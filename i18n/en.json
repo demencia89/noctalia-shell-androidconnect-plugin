@@ -1,0 +1,236 @@
+{
+  "panel": {
+    "title": "Connected Devices",
+    "phone": {
+      "wake-title": "Wake Device",
+      "wake-description": "Click to wake the device"
+    },
+    "signal": {
+      "very-weak": "Very Weak",
+      "weak": "Weak",
+      "fair": "Fair",
+      "good": "Good",
+      "excellent": "Excellent"
+    },
+    "unknown": "Unknown",
+    "card": {
+      "battery": "Battery",
+      "network": "Network",
+      "signal-strength": "Signal Strength",
+      "notifications": "Notifications",
+      "battery-charging": "Charging now",
+      "battery-discharging": "Running on battery",
+      "network-description": "Reported by the phone connectivity plugin.",
+      "signal-description": "No live cellular reading is available.",
+      "notifications-clear": "No active alerts",
+      "notifications-active": "Active notifications on the device"
+    },
+    "other-devices": "Other Devices",
+    "send-file-picker": "Pick file to send to device",
+    "send-file": "Send File",
+    "browse-device": "Browse Device Files",
+    "find-device": "Find my Device",
+    "quick-actions": {
+      "title": "Quick actions",
+      "description": "Common phone tools without leaving the panel.",
+      "wireless-adb-title": "Wireless ADB",
+      "wireless-adb-description": "Pair or reconnect adb for taps and key input.",
+      "browse-description": "Open the phone storage in your file manager.",
+      "send-description": "Push files directly to the active device.",
+      "find-description": "Make the phone ring so you can find it."
+    },
+    "remote": {
+      "title": "Live control",
+      "description": "Tap, drag, and use Android navigation directly from the panel.",
+      "connected-description": "KDE Connect is active. Quick actions and remote control stay in one place.",
+      "connected-badge": "Connected",
+      "session-badge": "Session active",
+      "ready-badge": "Remote ready"
+    },
+    "wireless-adb": {
+      "tooltip": "Open Wireless ADB tools",
+      "disabled-tooltip": "Wireless ADB is disabled in settings. Open details.",
+      "busy-tooltip": "Wireless ADB command is running",
+      "success-title": "Wireless ADB",
+      "success-description": "ADB over TCP/IP enabled",
+      "error-title": "Wireless ADB",
+      "missing-command-description": "Set a Wireless ADB helper command in the plugin settings",
+      "missing-pair-parameters-description": "Enter the phone IP, pairing port, and pairing code",
+      "missing-connect-parameters-description": "Enter the phone IP and connect port",
+      "dialog-title": "Wireless ADB",
+      "dialog-description": "Use Android's Wireless debugging screen to pair with a code, then connect to the adb port.",
+      "cable-only-label": "Cable-only mode",
+      "cable-only-description": "Disable Wireless ADB fallback and force USB-only scrcpy and adb input for this plugin.",
+      "qr-section-title": "Pair with QR code",
+      "qr-section-description": "On the phone, open Wireless debugging and choose Pair device with QR code, then scan this image.",
+      "qr-placeholder": "Tap Start QR to generate a pairing code.",
+      "qr-helper-description": "The plugin will wait for the scan, pair automatically, then connect ADB and save the resolved host and port.",
+      "qr-footer-description": "Leave this popup open until the phone finishes the scan.",
+      "qr-button": "Start QR Pairing",
+      "qr-refresh-button": "Refresh QR",
+      "qr-waiting-button": "Waiting for scan...",
+      "qr-waiting-description": "Waiting for the phone to scan the QR code and publish its pairing service.",
+      "qr-success-description": "Wireless ADB paired and connected from the QR code.",
+      "qr-generate-error-description": "Failed to generate the Wireless ADB QR code.",
+      "missing-qr-parameters-description": "Generate a fresh Wireless ADB QR code and try again.",
+      "pair-section-title": "Pair with code",
+      "pair-section-description": "On the phone, open Wireless debugging and choose Pair device with pairing code.",
+      "host-label": "Phone IP",
+      "pair-port-label": "Pair port",
+      "pair-code-label": "Pairing code",
+      "pair-button": "Pair",
+      "connect-section-title": "Connect after pairing",
+      "connect-section-description": "Use the adb port shown on the phone after pairing.",
+      "connect-host-label": "Phone IP",
+      "connect-port-label": "ADB port",
+      "connect-button": "Connect",
+      "legacy-section-title": "Legacy TCP/IP helper",
+      "legacy-section-description": "This runs the configured helper command, such as adb tcpip 5555, for older or already-authorized ADB flows.",
+      "legacy-button": "Run helper",
+      "running-status": "Running adb command...",
+      "running-description": "Keep this panel open until adb finishes.",
+      "status-title": "Last result",
+      "disabled-banner-title": "Cable-only mode is active",
+      "disabled-banner-description": "Wireless tools stay visible here for reference, but they are disabled until Wireless ADB is re-enabled in plugin settings."
+    },
+    "embedded-mirror": {
+      "starting-title": "Starting Embedded Mirror",
+      "starting-description": "Launching scrcpy and preparing the panel overlay.",
+      "missing-feed-title": "Mirror Window Missing",
+      "missing-feed-description": "The scrcpy window is not available yet.",
+      "syncing-title": "Positioning Mirror",
+      "syncing-description": "Waiting for the scrcpy window so it can be aligned to the phone frame.",
+      "error-title": "Mirror Error",
+      "not-configured-title": "Embedded Mirror Not Configured",
+      "not-configured-description": "Set an embedded scrcpy command in the plugin settings.",
+      "ready-title": "Remote Ready",
+      "ready-description": "Tap, drag, and use the Android navigation bar below.",
+      "nav-back": "Back",
+      "nav-home": "Home",
+      "nav-recents": "Recents"
+    },
+    "scrcpy": {
+      "starting-title": "Starting scrcpy",
+      "starting-description": "Preparing the control session",
+      "running-title": "scrcpy Active",
+      "running-description": "Click the phone tile again to stop the session",
+      "ready-title": "Launch scrcpy",
+      "ready-description": "Click to launch phone control",
+      "error-title": "scrcpy Error",
+      "not-configured-title": "scrcpy Not Configured",
+      "not-configured-description": "Set a scrcpy command in the plugin settings",
+      "missing-command-description": "Set a scrcpy command in the plugin settings"
+    },
+    "pair": "Pair with Device",
+    "pair-needed-title": "Pairing Needed",
+    "pair-needed-subtitle": "KDE Connect reported this device as temporarily unpaired.",
+    "pair-requested-title": "Pairing Request Sent",
+    "pair-requested-subtitle": "Approve the request on the phone to restore controls.",
+    "pair-requested": "Confirm the pairing request on the phone. The mirror and device actions will come back automatically after approval.",
+    "pair-description": "This device is temporarily reported as unpaired. Retry pairing here if KDE Connect did not recover on its own after reconnecting.",
+    "pair-waiting": "Waiting for the phone to accept the pairing request.",
+    "unpair": "Unpair Device",
+    "kdeconnect-error": {
+      "no-devices": "No device running KDE Connect found",
+      "unavailable-title": "kdeconnectd does not seem to be running!",
+      "unavailable-desc": "Make sure you've installed the KDE Connect Application on your system and that it has started the kdeconnectd daemon",
+      "device-unavailable": "Device is currently unavailable"
+    },
+    "busctl-error": {
+      "unavailable-title": "busctl cannot be found!",
+      "unavailable-desc": "Make sure busctl (part of systemd) is installed on your system"
+    }
+  },
+  "bar": {
+    "tooltip": "Connected Devices"
+  },
+  "control_center": {
+    "state-label": "State",
+    "state": {
+      "connected": "Connected",
+      "disconnected": "Disconnected",
+      "unavailable": "Unavailable",
+      "no-device": "No device",
+      "not-paired": "Not paired"
+    }
+  },
+  "settings": {
+    "no-device-connected-hide": {
+      "label": "Hide if unavailable",
+      "description": "Hide the bar button entirely if no device is connected"
+    },
+    "iconColor": {
+      "label": "Icon Color",
+      "desc": "Color of the icon in the bar"
+    },
+    "phone-action": {
+      "label": "Phone Click Action",
+      "description": "Choose whether the phone tile wakes the device or launches scrcpy",
+      "options": {
+        "wake-up": "Wake device",
+        "scrcpy": "Launch scrcpy"
+      }
+    },
+    "scrcpy-command": {
+      "label": "scrcpy Command",
+      "description": "Shell command to run when the phone tile is clicked. Example: scrcpy -s <serial>"
+    },
+    "scrcpy-stop-on-close": {
+      "label": "Stop scrcpy on Panel Close",
+      "description": "Terminate the scrcpy process when this panel closes"
+    },
+    "embedded-mirror-enabled": {
+      "label": "Embed Mirror in Panel",
+      "description": "Start scrcpy in no-window mode and render it inside the panel through a V4L2 loopback feed."
+    },
+    "embedded-scrcpy-command": {
+      "label": "Embedded scrcpy Command",
+      "description": "Base scrcpy command for the in-panel mirror. The plugin appends --no-window and the V4L2 sink automatically."
+    },
+    "mirror-performance-preset": {
+      "label": "Mirror Performance Preset",
+      "description": "Tune the embedded mirror for lower latency or higher quality. Existing explicit scrcpy flags still win.",
+      "options": {
+        "balanced": "Balanced",
+        "latency": "Low latency",
+        "quality": "Higher quality"
+      }
+    },
+    "embedded-video-device": {
+      "label": "Loopback Video Device",
+      "description": "Path to the v4l2loopback device scrcpy writes to, for example /dev/video10."
+    },
+    "embedded-video-label": {
+      "label": "Loopback Device Label",
+      "description": "Camera name fragment used by Qt Multimedia to match that loopback feed, for example scrcpy-panel."
+    },
+    "embedded-video-encoder": {
+      "label": "Pinned Video Encoder",
+      "description": "Optional scrcpy encoder override for this phone, for example c2.qti.avc.encoder."
+    },
+    "embedded-video-codec-options": {
+      "label": "Video Codec Options",
+      "description": "Optional scrcpy video codec options passed through to Android's encoder."
+    },
+    "adb-device-serial": {
+      "label": "ADB Device Serial",
+      "description": "Optional. Leave empty to use the default adb device, or the saved Wireless ADB host and port if wireless fallback is enabled."
+    },
+    "wireless-adb-enabled": {
+      "label": "Enable Wireless ADB",
+      "description": "Show Wireless ADB tools and allow the plugin to reuse the saved phone IP and port. Disable this for cable-only ADB."
+    },
+    "mirror-reduce-background-polling": {
+      "label": "Reduce Background Polling While Mirroring",
+      "description": "Slow KDE Connect refreshes while the embedded mirror is active to free a bit of headroom."
+    },
+    "mirror-debug-overlay-enabled": {
+      "label": "Enable Mirror Debug Overlay",
+      "description": "Show a compact performance pill in the panel and append --print-fps to scrcpy for extra logs."
+    },
+    "wireless-adb-command": {
+      "label": "ADB TCP/IP Helper Command",
+      "description": "Legacy helper command available inside the panel's Wireless ADB dialog. The default uses adb tcpip 5555 for an already authorized ADB device; it does not toggle Android's Wireless debugging switch."
+    }
+  }
+}
