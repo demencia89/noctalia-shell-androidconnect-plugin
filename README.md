@@ -10,9 +10,23 @@ Upstream base project:
 Project repository:
 - https://github.com/demencia89/noctalia-shell-androidconnect-plugin
 
-## Screenshot
+## Screenshots
 
-![AndroidConnect screenshot](preview.png)
+### Plugin Preview
+
+![AndroidConnect plugin preview](preview.png)
+
+### Panel Overview
+
+![AndroidConnect panel overview](Docs/Screenshots/androidconnect-panel-overview.png)
+
+### Lock Screen View
+
+![AndroidConnect lock screen view](Docs/Screenshots/androidconnect-lock-screen.png)
+
+### Panel Close-up
+
+![AndroidConnect panel close-up](Docs/Screenshots/androidconnect-panel-closeup.png)
 
 ## Current Status
 
@@ -54,6 +68,7 @@ Required for the base plugin:
 Required for mirror and Android input features:
 - `scrcpy`
 - `adb` from Android platform-tools
+- Qt Multimedia runtime for your distro, for example `qt6-multimedia`
 
 Required for embedded live `Feed` mode:
 - `v4l2loopback`
