@@ -49,18 +49,15 @@
     },
     "wireless-adb": {
       "tooltip": "Open Wireless ADB tools",
-      "disabled-tooltip": "Wireless ADB is disabled in settings. Open details.",
       "busy-tooltip": "Wireless ADB command is running",
       "success-title": "Wireless ADB",
       "success-description": "ADB over TCP/IP enabled",
       "error-title": "Wireless ADB",
-      "missing-command-description": "Set a Wireless ADB helper command in the plugin settings",
+      "missing-command-description": "The built-in Wireless ADB helper could not start.",
       "missing-pair-parameters-description": "Enter the phone IP, pairing port, and pairing code",
       "missing-connect-parameters-description": "Enter the phone IP and connect port",
       "dialog-title": "Wireless ADB",
       "dialog-description": "Use Android's Wireless debugging screen to pair with a code, then connect to the adb port.",
-      "cable-only-label": "Cable-only mode",
-      "cable-only-description": "Disable Wireless ADB fallback and force USB-only scrcpy and adb input for this plugin.",
       "qr-section-title": "Pair with QR code",
       "qr-section-description": "On the phone, open Wireless debugging and choose Pair device with QR code, then scan this image.",
       "qr-placeholder": "Tap Start QR to generate a pairing code.",
@@ -89,20 +86,12 @@
       "legacy-button": "Run helper",
       "running-status": "Running adb command...",
       "running-description": "Keep this panel open until adb finishes.",
-      "status-title": "Last result",
-      "disabled-banner-title": "Cable-only mode is active",
-      "disabled-banner-description": "Wireless tools stay visible here for reference, but they are disabled until Wireless ADB is re-enabled in plugin settings."
+      "status-title": "Last result"
     },
     "embedded-mirror": {
       "starting-title": "Starting Embedded Mirror",
-      "starting-description": "Launching scrcpy and preparing the panel overlay.",
-      "missing-feed-title": "Mirror Window Missing",
-      "missing-feed-description": "The scrcpy window is not available yet.",
-      "syncing-title": "Positioning Mirror",
-      "syncing-description": "Waiting for the scrcpy window so it can be aligned to the phone frame.",
+      "starting-description": "Launching scrcpy and preparing the live feed.",
       "error-title": "Mirror Error",
-      "not-configured-title": "Embedded Mirror Not Configured",
-      "not-configured-description": "Set an embedded scrcpy command in the plugin settings.",
       "ready-title": "Remote Ready",
       "ready-description": "Tap, drag, and use the Android navigation bar below.",
       "nav-back": "Back",
@@ -155,82 +144,9 @@
     }
   },
   "settings": {
-    "no-device-connected-hide": {
-      "label": "Hide if unavailable",
-      "description": "Hide the bar button entirely if no device is connected"
-    },
     "iconColor": {
       "label": "Widget Icon Color",
       "desc": "Color of the AndroidConnect bar widget icon"
-    },
-    "phone-action": {
-      "label": "Phone Click Action",
-      "description": "Choose whether the phone tile wakes the device or launches scrcpy",
-      "options": {
-        "wake-up": "Wake device",
-        "scrcpy": "Launch scrcpy"
-      }
-    },
-    "scrcpy-command": {
-      "label": "scrcpy Command",
-      "description": "Shell command to run when the phone tile is clicked. Example: scrcpy -s <serial>"
-    },
-    "scrcpy-stop-on-close": {
-      "label": "Stop scrcpy on Panel Close",
-      "description": "Terminate the scrcpy process when this panel closes"
-    },
-    "embedded-mirror-enabled": {
-      "label": "Embed Mirror in Panel",
-      "description": "Start scrcpy in no-window mode and render it inside the panel through a V4L2 loopback feed."
-    },
-    "embedded-scrcpy-command": {
-      "label": "Embedded scrcpy Command",
-      "description": "Base scrcpy command for the in-panel mirror. The plugin appends --no-window and the V4L2 sink automatically."
-    },
-    "mirror-performance-preset": {
-      "label": "Mirror Performance Preset",
-      "description": "Tune the embedded mirror for lower latency or higher quality. Existing explicit scrcpy flags still win.",
-      "options": {
-        "balanced": "Balanced",
-        "latency": "Low latency",
-        "quality": "Higher quality"
-      }
-    },
-    "embedded-video-device": {
-      "label": "Loopback Video Device",
-      "description": "Path to the v4l2loopback device scrcpy writes to, for example /dev/video10."
-    },
-    "embedded-video-label": {
-      "label": "Loopback Device Label",
-      "description": "Camera name fragment used by Qt Multimedia to match that loopback feed, for example scrcpy-panel."
-    },
-    "embedded-video-encoder": {
-      "label": "Pinned Video Encoder",
-      "description": "Optional scrcpy encoder override for this phone, for example c2.qti.avc.encoder."
-    },
-    "embedded-video-codec-options": {
-      "label": "Video Codec Options",
-      "description": "Optional scrcpy video codec options passed through to Android's encoder."
-    },
-    "adb-device-serial": {
-      "label": "ADB Device Serial",
-      "description": "Optional. Leave empty to use the default adb device, or the saved Wireless ADB host and port if wireless fallback is enabled."
-    },
-    "wireless-adb-enabled": {
-      "label": "Enable Wireless ADB",
-      "description": "Show Wireless ADB tools and allow the plugin to reuse the saved phone IP and port. Disable this for cable-only ADB."
-    },
-    "mirror-reduce-background-polling": {
-      "label": "Reduce Background Polling While Mirroring",
-      "description": "Slow KDE Connect refreshes while the embedded mirror is active to free a bit of headroom."
-    },
-    "mirror-debug-overlay-enabled": {
-      "label": "Enable Mirror Debug Overlay",
-      "description": "Show a compact performance pill in the panel and append --print-fps to scrcpy for extra logs."
-    },
-    "wireless-adb-command": {
-      "label": "ADB TCP/IP Helper Command",
-      "description": "Legacy helper command available inside the panel's Wireless ADB dialog. The default uses adb tcpip 5555 for an already authorized ADB device; it does not toggle Android's Wireless debugging switch."
     }
   }
 }

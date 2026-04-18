@@ -8,14 +8,12 @@ import QtMultimedia
 Rectangle {
   id: phoneRoot
 
-  property string backgroundImage: ""
   property bool showStatusOverlay: false
   property string statusTitle: ""
   property string statusSubtitle: ""
   property bool busy: false
   property bool mirrorFeedEnabled: false
   property bool interactiveScreen: false
-  property bool overlayWindowActive: false
   property string mirrorDeviceIdMatch: ""
   property string mirrorDeviceDescriptionMatch: ""
   property int mirrorContentWidth: 0
@@ -60,7 +58,6 @@ Rectangle {
   readonly property real videoFrameGlobalHeight: videoFrame.height
   readonly property real screenRadius: 44.3 * phoneRoot.scaleFactor
   readonly property real videoFrameRadius: 52 * phoneRoot.scaleFactor
-  readonly property bool externalOverlayVisible: phoneRoot.overlayWindowActive && !phoneRoot.mirrorFeedEnabled
   readonly property string normalizedIdMatch: (mirrorDeviceIdMatch || "").trim().toLowerCase()
   readonly property string normalizedDescriptionMatch: (mirrorDeviceDescriptionMatch || "").trim().toLowerCase()
   readonly property var mediaDevicesRef: mediaDevicesLoader.item
@@ -155,8 +152,6 @@ Rectangle {
     && !mirrorFeedRestarting
     && !mirrorFeedAttachDelayActive
   readonly property bool mirrorDisplayVisible: shouldActivateMirrorCamera && mirrorFeedError === ""
-  readonly property bool snapshotFrameVisible: backgroundImage !== "" && !externalOverlayVisible
-
   radius: 0
   color: "transparent"
   border.width: 0
@@ -264,7 +259,7 @@ Rectangle {
     MouseArea {
       anchors.fill: parent
       hoverEnabled: true
-      enabled: !phoneRoot.interactiveScreen && !phoneRoot.externalOverlayVisible
+      enabled: !phoneRoot.interactiveScreen
 
       onClicked: phoneRoot.clicked()
     }
@@ -291,10 +286,10 @@ Rectangle {
         bottomMargin: phoneRect.height * phoneRoot.screenInsetBottomRatio
       }
       radius: phoneRoot.screenRadius
-      color: phoneRoot.externalOverlayVisible ? "transparent" : "#040506"
+      color: "#040506"
       antialiasing: true
       clip: true
-      layer.enabled: !phoneRoot.mirrorDisplayVisible || phoneRoot.externalOverlayVisible
+      layer.enabled: !phoneRoot.mirrorDisplayVisible
       layer.effect: OpacityMask {
         maskSource: Rectangle {
           width: screen.width
@@ -306,55 +301,11 @@ Rectangle {
 
       Rectangle {
         anchors.fill: parent
-        visible: !phoneRoot.mirrorDisplayVisible && !phoneRoot.externalOverlayVisible
+        visible: !phoneRoot.mirrorDisplayVisible
         gradient: Gradient {
           GradientStop { position: 0.0; color: "#161d2a" }
           GradientStop { position: 0.55; color: "#111825" }
           GradientStop { position: 1.0; color: "#07090d" }
-        }
-      }
-
-      Image {
-        anchors.fill: parent
-        source: phoneRoot.backgroundImage
-        fillMode: Image.PreserveAspectCrop
-        visible: phoneRoot.backgroundImage !== "" && !phoneRoot.mirrorDisplayVisible && !phoneRoot.externalOverlayVisible
-      }
-
-      Item {
-        anchors.fill: parent
-        visible: phoneRoot.externalOverlayVisible
-
-        Rectangle {
-          x: 0
-          y: 0
-          width: parent.width
-          height: videoFrame.y
-          color: "black"
-        }
-
-        Rectangle {
-          x: 0
-          y: videoFrame.y + videoFrame.height
-          width: parent.width
-          height: Math.max(0, parent.height - y)
-          color: "black"
-        }
-
-        Rectangle {
-          x: 0
-          y: videoFrame.y
-          width: videoFrame.x
-          height: videoFrame.height
-          color: "black"
-        }
-
-        Rectangle {
-          x: videoFrame.x + videoFrame.width
-          y: videoFrame.y
-          width: Math.max(0, parent.width - x)
-          height: videoFrame.height
-          color: "black"
         }
       }
 
@@ -364,9 +315,9 @@ Rectangle {
         width: phoneRoot.videoFrameWidth
         height: phoneRoot.videoFrameHeight
         radius: phoneRoot.videoFrameRadius
-        color: phoneRoot.externalOverlayVisible ? "transparent" : "black"
+        color: "black"
         antialiasing: true
-        visible: phoneRoot.mirrorFeedEnabled || phoneRoot.externalOverlayVisible || phoneRoot.snapshotFrameVisible
+        visible: phoneRoot.mirrorFeedEnabled
         clip: true
         layer.enabled: videoFrame.visible
         layer.effect: OpacityMask {
@@ -383,17 +334,6 @@ Rectangle {
           anchors.fill: parent
           visible: phoneRoot.mirrorDisplayVisible
           fillMode: VideoOutput.Stretch
-        }
-
-        Image {
-          anchors.fill: parent
-          source: phoneRoot.backgroundImage
-          fillMode: Image.PreserveAspectCrop
-          visible: !phoneRoot.mirrorDisplayVisible
-            && !phoneRoot.externalOverlayVisible
-            && phoneRoot.backgroundImage !== ""
-          smooth: true
-          mipmap: true
         }
 
         MouseArea {
@@ -596,7 +536,7 @@ Rectangle {
 
         MouseArea {
           anchors.fill: parent
-          enabled: visible && !phoneRoot.interactiveScreen && !phoneRoot.busy && !phoneRoot.externalOverlayVisible
+          enabled: visible && !phoneRoot.interactiveScreen && !phoneRoot.busy
           hoverEnabled: enabled
           cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
           onClicked: phoneRoot.clicked()
@@ -682,7 +622,7 @@ Rectangle {
       radius: height / 2
       color: "white"
       opacity: 0.66
-      visible: !phoneRoot.externalOverlayVisible
+      visible: true
     }
   }
 }

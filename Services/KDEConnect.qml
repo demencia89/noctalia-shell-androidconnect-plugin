@@ -28,18 +28,10 @@ QtObject {
   property string scrcpyLaunchError: ""
   property string scrcpyLastStderr: ""
   property string scrcpyDeviceId: ""
-  property string scrcpyWindowTitle: "AndroidConnect Mirror"
-  property string scrcpyWindowAddress: ""
-  property bool scrcpyWindowFloating: false
-  property bool scrcpyWindowPinned: false
   property string scrcpyFeedDevicePath: ""
-  property string scrcpySessionMode: ""
   property string scrcpyActiveSerial: ""
   property string scrcpyCleanupFeedDevicePath: ""
-  property string scrcpyCleanupWindowTitle: ""
-  property string hyprClientsStdout: ""
   readonly property bool scrcpyRunning: scrcpySessionProc.running
-  readonly property bool scrcpyWindowReady: scrcpyRunning && scrcpyWindowAddress !== ""
   property bool wirelessAdbBusy: false
   property var wirelessAdbCommandArgs: []
   property string wirelessAdbLastStdout: ""
@@ -63,11 +55,6 @@ QtObject {
   property string adbQueuedStdout: ""
   property string adbQueuedStderr: ""
   property var adbCommandQueue: []
-  property string v4l2SnapshotPath: ""
-  property string snapshotWriteTempPath: ""
-  property string v4l2SnapshotError: ""
-  property int v4l2SnapshotVersion: 0
-  property string adbSnapshotSerial: ""
   property bool reduceBackgroundRefresh: false
   readonly property int refreshIntervalMs: reduceBackgroundRefresh ? 20000 : 5000
   property double scrcpyLaunchStartedAtMs: 0
@@ -197,15 +184,6 @@ QtObject {
     proc.running = true;
   }
 
-  function toggleScrcpySession(deviceId: string, commandString: string): bool {
-    if (scrcpyRunning) {
-      stopScrcpySession();
-      return false;
-    }
-
-    return launchScrcpySession(deviceId, commandString);
-  }
-
   function launchScrcpySession(deviceId: string, commandString: string): bool {
     const trimmedCommand = (commandString || "").trim();
     if (trimmedCommand === "") {
@@ -222,19 +200,21 @@ QtObject {
       return false;
     }
 
+    const sinkMatch = trimmedCommand.match(/--v4l2-sink=(?:'([^']*)'|\"([^\"]*)\"|(\S+))/);
+    const feedDevicePath = sinkMatch
+      ? String(sinkMatch[1] || sinkMatch[2] || sinkMatch[3] || "").trim()
+      : "";
+    if (feedDevicePath === "") {
+      scrcpyLaunchError = "Embedded mirror requires a V4L2 sink device.";
+      return false;
+    }
+
     scrcpyLaunching = true;
     scrcpyStopRequested = false;
     scrcpyLaunchError = "";
     scrcpyLastStderr = "";
     scrcpyDeviceId = deviceId;
-    scrcpyWindowAddress = "";
-    scrcpyWindowFloating = false;
-    scrcpyWindowPinned = false;
-    const sinkMatch = trimmedCommand.match(/--v4l2-sink=(?:'([^']*)'|\"([^\"]*)\"|(\S+))/);
-    scrcpyFeedDevicePath = sinkMatch
-      ? String(sinkMatch[1] || sinkMatch[2] || sinkMatch[3] || "").trim()
-      : "";
-    scrcpySessionMode = scrcpyFeedDevicePath !== "" ? "feed" : "overlay";
+    scrcpyFeedDevicePath = feedDevicePath;
     const serialMatch = trimmedCommand.match(/(?:^|\s)(?:-s|--serial)(?:=|\s+)(?:'([^']*)'|\"([^\"]*)\"|(\S+))/);
     let launchSerial = serialMatch
       ? String(serialMatch[1] || serialMatch[2] || serialMatch[3] || "")
@@ -242,12 +222,9 @@ QtObject {
     if (launchSerial === "" && /(^|\s)(?:-d|--select-usb)\b/.test(trimmedCommand))
       launchSerial = root.usbSelectionSentinel;
     scrcpyActiveSerial = launchSerial;
-    v4l2SnapshotVersion = 0;
-    v4l2SnapshotError = "";
     scrcpyLaunchStartedAtMs = Date.now();
     scrcpyCommandArgs = parsedCommand.args;
     Logger.i("KDEConnect", "Launching scrcpy session:",
-      "mode=" + scrcpySessionMode,
       "deviceId=" + scrcpyDeviceId,
       "serial=" + (isUsbSelectionSerial(launchSerial) ? "usb" : launchSerial),
       "program=" + String(parsedCommand.args[0] || ""));
@@ -265,7 +242,6 @@ QtObject {
 
   function forceStopScrcpyProcesses(feedDevicePath: string): void {
     scrcpyCleanupFeedDevicePath = String(feedDevicePath || "").trim();
-    scrcpyCleanupWindowTitle = String(root.scrcpyWindowTitle || "").trim();
 
     if (scrcpyRunning)
       stopScrcpySession();
@@ -379,7 +355,7 @@ QtObject {
     return normalizeShellCommand(commandString + " " + optionText);
   }
 
-  function applyMirrorPerformancePreset(commandString: string, presetName: string, feedMode: bool): string {
+  function applyMirrorPerformancePreset(commandString: string, presetName: string): string {
     let command = normalizeShellCommand(commandString);
     const preset = String(presetName || "").trim().toLowerCase();
     let bitrateOption = "--video-bit-rate=8M";
@@ -398,12 +374,7 @@ QtObject {
     command = appendScrcpyOption(command, /(^|\s)--max-fps(?:=\S+|\s+\S+)\b/, maxFpsOption);
     command = appendScrcpyOption(command, /(^|\s)(?:-b|--video-bit-rate)(?:=\S+|\s+\S+)\b/, bitrateOption);
     command = appendScrcpyOption(command, /(^|\s)--video-codec(?:=\S+|\s+\S+)\b/, "--video-codec=h264");
-
-    if (feedMode)
-      command = appendScrcpyOption(command, /(^|\s)--v4l2-buffer(?:=\S+|\s+\S+)\b/, "--v4l2-buffer=0");
-    else
-      command = appendScrcpyOption(command, /(^|\s)--video-buffer(?:=\S+|\s+\S+)\b/, "--video-buffer=0");
-
+    command = appendScrcpyOption(command, /(^|\s)--v4l2-buffer(?:=\S+|\s+\S+)\b/, "--v4l2-buffer=0");
     return command;
   }
 
@@ -418,43 +389,6 @@ QtObject {
     if (!audioEnabled)
       command = appendScrcpyOption(command, /(^|\s)--no-audio\b/, "--no-audio");
 
-    return command;
-  }
-
-  function buildScrcpyOverlayCommand(commandString: string, windowTitle: string, x: real, y: real, width: real, height: real, deviceSerial: string): string {
-    let command = normalizeShellCommand(commandString);
-    const trimmedSerial = String(deviceSerial || "").trim();
-    if (command === "")
-      return "";
-
-    command = command
-      .replace(/(^|\s)--no-window\b/g, " ")
-      .replace(/(^|\s)--no-video-playback\b/g, " ")
-      .replace(/(^|\s)--v4l2-sink(?:=\S+|\s+\S+)/g, " ")
-      .replace(/(^|\s)-s(?:=\S+|\s+\S+)/g, " ")
-      .replace(/(^|\s)--serial(?:=\S+|\s+\S+)/g, " ")
-      .replace(/(^|\s)-d\b/g, " ")
-      .replace(/(^|\s)-e\b/g, " ")
-      .replace(/(^|\s)--select-usb\b/g, " ")
-      .replace(/(^|\s)--select-tcpip\b/g, " ")
-      .replace(/(^|\s)--tcpip(?:=\S+|\s+\S+)/g, " ")
-      .replace(/(^|\s)--window-title(?:=\S+|\s+\S+)/g, " ")
-      .replace(/(^|\s)--window-x(?:=\S+|\s+\S+)/g, " ")
-      .replace(/(^|\s)--window-y(?:=\S+|\s+\S+)/g, " ")
-      .replace(/(^|\s)--window-width(?:=\S+|\s+\S+)/g, " ")
-      .replace(/(^|\s)--window-height(?:=\S+|\s+\S+)/g, " ");
-
-    command = normalizeShellCommand(command);
-    command += " --window-borderless --always-on-top";
-    command += " --window-title=" + shellQuote(windowTitle);
-    command += " --window-x=" + Math.max(0, Math.round(x));
-    command += " --window-y=" + Math.max(0, Math.round(y));
-    command += " --window-width=" + Math.max(1, Math.round(width));
-    command += " --window-height=" + Math.max(1, Math.round(height));
-    if (isUsbSelectionSerial(trimmedSerial))
-      command += " --select-usb";
-    else if (trimmedSerial !== "")
-      command += " --serial=" + shellQuote(trimmedSerial);
     return command;
   }
 
@@ -495,58 +429,6 @@ QtObject {
     else if (trimmedSerial !== "")
       command += " --serial=" + shellQuote(trimmedSerial);
     return command;
-  }
-
-  function refreshScrcpyWindowState(): bool {
-    if (!scrcpyRunning || hyprClientsProc.running)
-      return false;
-
-    Logger.i("KDEConnect", "Refreshing scrcpy window state");
-    hyprClientsStdout = "";
-    hyprClientsProc.running = true;
-    return true;
-  }
-
-  function syncScrcpyOverlayWindow(x: real, y: real, width: real, height: real): bool {
-    if (!scrcpyRunning)
-      return false;
-
-    const targetX = Math.max(0, Math.round(x));
-    const targetY = Math.max(0, Math.round(y));
-    const targetWidth = Math.max(1, Math.round(width));
-    const targetHeight = Math.max(1, Math.round(height));
-
-    if (scrcpyWindowAddress === "") {
-      Logger.i("KDEConnect", "scrcpy window address not ready yet, retrying discovery");
-      refreshScrcpyWindowState();
-      return false;
-    }
-
-    const batchCommands = [];
-    const windowSelector = "address:" + scrcpyWindowAddress;
-
-    if (!scrcpyWindowFloating)
-      batchCommands.push("dispatch togglefloating " + windowSelector);
-
-    if (!scrcpyWindowPinned)
-      batchCommands.push("dispatch pin " + windowSelector);
-
-    batchCommands.push("dispatch movewindowpixel exact "
-      + targetX + " " + targetY + "," + windowSelector);
-    batchCommands.push("dispatch resizewindowpixel exact "
-      + targetWidth + " " + targetHeight + "," + windowSelector);
-
-    const proc = hyprBatchComponent.createObject(root, {
-      batchCommand: batchCommands.join("; ")
-    });
-    Logger.i("KDEConnect", "Syncing scrcpy overlay window:",
-      "address=" + scrcpyWindowAddress,
-      "x=" + targetX,
-      "y=" + targetY,
-      "width=" + targetWidth,
-      "height=" + targetHeight);
-    proc.running = true;
-    return true;
   }
 
   function runWirelessAdbCommandArgs(commandArgs): bool {
@@ -895,32 +777,6 @@ QtObject {
     ]);
   }
 
-  function captureAdbFrame(serial: string, outputPath: string): bool {
-    const trimmedSerial = (serial || "").trim();
-    const trimmedPath = (outputPath || "").trim();
-    if (trimmedSerial === "" || trimmedPath === "" || adbSnapshotProc.running)
-      return false;
-
-    adbSnapshotSerial = trimmedSerial;
-    v4l2SnapshotPath = trimmedPath;
-    snapshotWriteTempPath = temporaryOutputPath(trimmedPath);
-    v4l2SnapshotError = "";
-    adbSnapshotProc.running = true;
-    return true;
-  }
-
-  function temporaryOutputPath(outputPath: string): string {
-    const trimmedPath = String(outputPath || "").trim();
-    if (trimmedPath === "")
-      return "";
-
-    return trimmedPath
-      + ".tmp-"
-      + Date.now()
-      + "-"
-      + Math.floor(Math.random() * 1000000);
-  }
-
   function busctlCall(obj, itf, method, params = []) {
     let result = [ root.busctlCmd, "--user", "call", "--json=short", "org.kde.kdeconnect", obj, itf, method ];
     return result.concat(params);
@@ -1012,6 +868,8 @@ QtObject {
     onExited: (exitCode, exitStatus) => {
       root.daemonAvailable = exitCode == 0;
       if (root.daemonAvailable) {
+        if (root.reduceBackgroundRefresh)
+          return;
         forceOnNetworkChange.running = true;
       } else {
         root.devices = []
@@ -1496,99 +1354,6 @@ QtObject {
     }
   }
 
-  property Process adbSnapshotProc: Process {
-    id: adbSnapshotProc
-    running: false
-    command: [
-      "sh",
-      "-lc",
-      "tmp_path=" + root.shellQuote(root.snapshotWriteTempPath)
-        + "; final_path=" + root.shellQuote(root.v4l2SnapshotPath)
-        + "; trap 'rm -f -- \"$tmp_path\"' EXIT"
-        + "; timeout -k 0.4s 1.8s "
-        + root.shellJoinArgs(root.adbCommand(root.adbSnapshotSerial, ["exec-out", "screencap", "-p"]))
-        + " > \"$tmp_path\""
-        + " && [ -s \"$tmp_path\" ]"
-        + " && mv -f \"$tmp_path\" \"$final_path\""
-    ]
-
-    stderr: StdioCollector {
-      onStreamFinished: {
-        root.v4l2SnapshotError = text.trim();
-      }
-    }
-
-    onExited: (exitCode, exitStatus) => {
-      if (exitCode === 0)
-        root.v4l2SnapshotVersion += 1;
-      else if (root.v4l2SnapshotError === "")
-        root.v4l2SnapshotError = "adb snapshot exited with code " + exitCode;
-
-      root.adbSnapshotSerial = "";
-      root.snapshotWriteTempPath = "";
-    }
-  }
-
-  property Process hyprClientsProc: Process {
-    id: hyprClientsProc
-    running: false
-    command: ["hyprctl", "clients", "-j"]
-
-    stdout: StdioCollector {
-      onStreamFinished: {
-        root.hyprClientsStdout = text.trim();
-      }
-    }
-
-    onExited: (exitCode, exitStatus) => {
-      if (exitCode !== 0 || root.hyprClientsStdout === "") {
-        Logger.w("KDEConnect", "Hyprland client query failed for scrcpy window:",
-          "exitCode=" + exitCode,
-          "stdoutEmpty=" + (root.hyprClientsStdout === ""));
-        root.scrcpyWindowAddress = "";
-        root.scrcpyWindowFloating = false;
-        root.scrcpyWindowPinned = false;
-        return;
-      }
-
-      try {
-        const clients = JSON.parse(root.hyprClientsStdout);
-        const matchedClient = clients.find(client =>
-          String(client.title || "") === root.scrcpyWindowTitle
-            || String(client.initialTitle || "") === root.scrcpyWindowTitle);
-
-        if (matchedClient) {
-          root.scrcpyWindowAddress = String(matchedClient.address || "");
-          root.scrcpyWindowFloating = Boolean(matchedClient.floating);
-          root.scrcpyWindowPinned = Boolean(matchedClient.pinned);
-          Logger.i("KDEConnect", "Matched scrcpy window:",
-            "address=" + root.scrcpyWindowAddress,
-            "floating=" + root.scrcpyWindowFloating,
-            "pinned=" + root.scrcpyWindowPinned);
-        } else {
-          Logger.i("KDEConnect", "scrcpy window not found in Hyprland clients yet");
-          root.scrcpyWindowAddress = "";
-          root.scrcpyWindowFloating = false;
-          root.scrcpyWindowPinned = false;
-        }
-      } catch (error) {
-        Logger.w("KDEConnect", "Failed to parse Hyprland clients:", error);
-        root.scrcpyWindowAddress = "";
-        root.scrcpyWindowFloating = false;
-        root.scrcpyWindowPinned = false;
-      }
-    }
-  }
-
-  property Component hyprBatchComponent: Component {
-    Process {
-      id: proc
-      property string batchCommand: ""
-      command: ["hyprctl", "--batch", batchCommand]
-      onExited: proc.destroy()
-    }
-  }
-
   property Process scrcpySessionProc: Process {
     id: scrcpySessionProc
     running: false
@@ -1605,17 +1370,12 @@ QtObject {
     onStarted: {
       root.scrcpyLaunching = false;
       root.adbScreenError = "";
-      if (root.scrcpySessionMode === "overlay")
-        root.refreshScrcpyWindowState();
-      Logger.i("KDEConnect", "Started scrcpy session for device:",
-        root.scrcpyDeviceId,
-        "mode=" + root.scrcpySessionMode);
+      Logger.i("KDEConnect", "Started scrcpy session for device:", root.scrcpyDeviceId);
     }
 
     onExited: (exitCode, exitStatus) => {
       root.scrcpyLaunching = false;
       Logger.i("KDEConnect", "scrcpy session exited:",
-        "mode=" + root.scrcpySessionMode,
         "exitCode=" + exitCode,
         "stopRequested=" + root.scrcpyStopRequested,
         "stderr=" + (root.scrcpyLastStderr || ""));
@@ -1641,11 +1401,7 @@ QtObject {
       root.scrcpyStopRequested = false;
       root.scrcpyCommandArgs = [];
       root.scrcpyDeviceId = "";
-      root.scrcpyWindowAddress = "";
-      root.scrcpyWindowFloating = false;
-      root.scrcpyWindowPinned = false;
       root.scrcpyFeedDevicePath = "";
-      root.scrcpySessionMode = "";
       root.scrcpyActiveSerial = "";
       root.scrcpyLaunchStartedAtMs = 0;
       root.adbScreenWidth = 0;
@@ -1660,10 +1416,6 @@ QtObject {
       root.adbQueuedStdout = "";
       root.adbQueuedStderr = "";
       root.adbCommandQueue = [];
-      root.adbSnapshotSerial = "";
-      root.snapshotWriteTempPath = "";
-      root.v4l2SnapshotVersion = 0;
-      root.v4l2SnapshotError = "";
     }
   }
 
@@ -1672,14 +1424,10 @@ QtObject {
     running: false
     command: ["sh", "-lc",
       "device=" + root.shellQuote(root.scrcpyCleanupFeedDevicePath)
-      + "; title=" + root.shellQuote(root.scrcpyCleanupWindowTitle)
       + "; for pid in $(pgrep -x scrcpy || true); do"
       + " cmd=$(tr '\\0' '\\n' </proc/$pid/cmdline 2>/dev/null || true)"
       + "; if [ -n \"$device\" ] && printf '%s\\n' \"$cmd\" | grep -Fqx -- \"--v4l2-sink=$device\"; then"
       + " kill -TERM \"$pid\" 2>/dev/null || true; continue"
-      + "; fi"
-      + "; if [ -n \"$title\" ] && printf '%s\\n' \"$cmd\" | grep -Fqx -- \"--window-title=$title\"; then"
-      + " kill -TERM \"$pid\" 2>/dev/null || true"
       + "; fi"
       + "; done"
       + "; sleep 0.35"
@@ -1688,15 +1436,11 @@ QtObject {
       + "; if [ -n \"$device\" ] && printf '%s\\n' \"$cmd\" | grep -Fqx -- \"--v4l2-sink=$device\"; then"
       + " kill -KILL \"$pid\" 2>/dev/null || true; continue"
       + "; fi"
-      + "; if [ -n \"$title\" ] && printf '%s\\n' \"$cmd\" | grep -Fqx -- \"--window-title=$title\"; then"
-      + " kill -KILL \"$pid\" 2>/dev/null || true"
-      + "; fi"
       + "; done"
     ]
 
     onExited: (exitCode, exitStatus) => {
       root.scrcpyCleanupFeedDevicePath = "";
-      root.scrcpyCleanupWindowTitle = "";
     }
   }
 

@@ -30,43 +30,23 @@ Project repository:
 
 ## Current Status
 
-Current plugin version: `1.2.3`
+Current plugin version: `1.2.4`
 
-The plugin is currently shaped for real user installs, not just local experimentation.
+The plugin is now feed-only: the embedded phone view always uses the live `scrcpy` -> `v4l2loopback` feed path.
 
-Current shipped configuration is intentionally small:
-- Plugin settings only expose the widget icon color.
-- The panel keeps runtime state for phone size, embedded audio, snapshot fallback mode, and remembered Wireless ADB host and port.
-- Embedded mirror uses the built-in high-quality profile by default.
-
-Known-good behavior currently preserved:
-- Live `Feed` mode works.
-- Manual `Fallback` mode is ADB screenshot mode, timer-driven at 80 ms.
-- The `Fallback` / `Feed` toggle persists across panel close and reopen.
-- The `Fallback` / `Feed` toggle is the left-most button in the top header row.
-- The embedded audio toggle is present in the top header row, to the left of the Wi-Fi button.
-- Opening the plugin while `scrcpy` is already connected sends unlock-only, not Home.
-- The bottom Android nav row stays visible during drawer open and mirror startup, and becomes active when Android input is ready.
-- The status/error card hides completely when there is nothing to show.
-
-Recent release-polish changes:
-- Removed the fake user-facing mirror/scrcpy settings and kept the embedded mirror path fixed to the built-in high-quality configuration.
-- The panel stays in setup/error state instead of trying to auto-start `scrcpy` when ADB is missing, unauthorized, offline, or the loopback feed is not ready.
-- Made mirror snapshot and Wireless ADB QR temp files instance-scoped in `/tmp`.
-- Made ADB snapshot writes atomic to avoid stale or partially-written preview frames.
-- Matched the mobile network icon to the actual reported radio type, including distinct `LTE`, `4G`, and `5G` states.
-- Added user-facing notifications when Browse Files or Send File actions fail, so failures are visible instead of disappearing silently.
-- Suppressed transient status, warning, and error surfaces for the first 5 seconds after the drawer opens.
-- Delayed the embedded mirror fallback suggestion until the drawer has been open for 8 seconds and the live feed is still failing.
-- Kept the supported fallback path as snapshot mode only. Overlay fallback was not reintroduced.
+Current behavior:
+- Embedded mirror launches automatically when the panel is ready
+- Audio can be toggled from the panel header
+- Android nav buttons stay visible below the phone preview
+- Status and error messages stay hidden during the initial grace period, then appear only if the feed or input path is still not ready
+- Opening the panel while `scrcpy` is already connected sends unlock-only, not Home
 
 ## Features
 
 - KDE Connect device list, state, battery, signal, and notification summary
-- Browse files, send files, and ring phone from the panel
+- Wake device, browse files, send files, and ring phone from the panel
 - Embedded in-panel Android mirror
-- Live V4L2 `Feed` mode for the embedded mirror
-- Manual snapshot `Fallback` mode for unstable feed environments
+- Live V4L2 feed for the embedded mirror
 - Optional embedded audio toggle, off by default
 - ADB tap, swipe, text, key, and Android navigation input
 - Wireless ADB pairing and reconnect helpers
@@ -108,7 +88,7 @@ Not versioned in this repository:
 
 ## First-Time Setup
 
-If you want the current default experience, which is embedded `scrcpy` inside the panel:
+If you want the default experience, which is embedded `scrcpy` inside the panel:
 
 1. Install `scrcpy`, `adb`, Qt Multimedia, and `v4l2loopback`.
 2. On the phone, enable Developer options and USB debugging.
@@ -129,21 +109,19 @@ If you only want device status and KDE Connect actions:
 
 If you want the phone rendered inside the panel:
 
-1. Install `scrcpy`, `adb`, Qt Multimedia, and `v4l2loopback`.
-2. Create a V4L2 loopback device.
+1. Create a V4L2 loopback device.
    Example:
 
 ```bash
 sudo modprobe v4l2loopback video_nr=10 card_label=scrcpy-panel exclusive_caps=1
 ```
 
-3. Use `/dev/video10` with a `scrcpy-panel` loopback label, which is the built-in expectation of the current plugin build.
-4. Open the panel and start the mirror.
+2. Make sure `/dev/video10` exists and `scrcpy-panel` is visible to Qt Multimedia.
+3. Open the panel and wait for the embedded mirror to start.
+4. Use the speaker button in the header if you want embedded audio.
 
 Notes:
-- `Feed` is the preferred live mode.
-- `Fallback` is the supported manual snapshot mode.
-- The `Fallback` / `Feed` toggle is persistent across panel reopen.
+- The embedded mirror always uses the feed path.
 - If the feed is unavailable, verify that the loopback device exists, is writable, and matches the configured label.
 - If the phone is already mirrored when you open the plugin, AndroidConnect sends unlock-only and does not send Home.
 
@@ -171,7 +149,6 @@ If it fails:
 - Check that the KDE Connect SFTP feature is enabled on the phone.
 - Make sure `sshfs` and FUSE support are installed.
 - If your file manager is sandboxed, it may not be able to access the mounted path.
-- AndroidConnect also shows a notification when Browse Files or Send File fails so the error stays visible while debugging.
 
 ## Development Notes
 
