@@ -69,6 +69,21 @@ jobs:
             --exclude 'settings.json' \
             source/ "plugin-manager/${TARGET_PATH}/"
 
+      - name: Normalize plugin-manager manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          manifest_path="plugin-manager/${TARGET_PATH}/manifest.json"
+          tmp_manifest="$(mktemp)"
+
+          jq '
+            del(.official)
+            | .repository = "https://github.com/noctalia-dev/noctalia-plugins"
+          ' "$manifest_path" > "$tmp_manifest"
+
+          mv "$tmp_manifest" "$manifest_path"
+
       - name: Commit and push sync
         shell: bash
         run: |
