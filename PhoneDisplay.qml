@@ -4,8 +4,6 @@ import QtQuick.Layouts
 import QtQuick.Effects
 import Qt5Compat.GraphicalEffects
 import QtMultimedia
-import qs.Commons
-import qs.Widgets
 
 Rectangle {
   id: phoneRoot
@@ -52,10 +50,6 @@ Rectangle {
       return mirrorContentWidth / mirrorContentHeight;
     return screen.width / Math.max(1, screen.height);
   }
-  readonly property real screenGlobalX: phoneRoot.mapToGlobal(phoneRect.x + screen.x, phoneRect.y + screen.y).x
-  readonly property real screenGlobalY: phoneRoot.mapToGlobal(phoneRect.x + screen.x, phoneRect.y + screen.y).y
-  readonly property real screenGlobalWidth: screen.width
-  readonly property real screenGlobalHeight: screen.height
   readonly property real videoFrameWidth: Math.min(screen.width, screen.height * contentAspectRatio)
   readonly property real videoFrameHeight: Math.min(screen.height, screen.width / Math.max(0.001, contentAspectRatio))
   readonly property real videoFrameLocalX: phoneRect.x + screen.x + videoFrame.x
@@ -71,7 +65,6 @@ Rectangle {
   readonly property string normalizedDescriptionMatch: (mirrorDeviceDescriptionMatch || "").trim().toLowerCase()
   readonly property var mediaDevicesRef: mediaDevicesLoader.item
   readonly property var mediaVideoInputs: (mediaDevicesRef && mediaDevicesRef.videoInputs) ? mediaDevicesRef.videoInputs : []
-  readonly property int videoInputCount: mediaVideoInputs.length
   readonly property string availableVideoInputsSummary: {
     const inputs = mediaVideoInputs || [];
     if (inputs.length === 0)
@@ -205,16 +198,6 @@ Rectangle {
   }
 
   Timer {
-    id: mediaDevicesRescanTimer
-    interval: 1500
-    repeat: true
-    running: false
-    onTriggered: {
-      phoneRoot.reloadMediaDevices();
-    }
-  }
-
-  Timer {
     id: mirrorFeedAttachDelayTimer
     interval: 1400
     repeat: false
@@ -265,27 +248,6 @@ Rectangle {
       mirrorFeedError = "";
     else
       mirrorFeedRestarting = false;
-  }
-
-  Timer {
-    id: mirrorFeedRetryTimer
-    interval: 280
-    repeat: false
-    onTriggered: {
-      if (!phoneRoot.mirrorFeedEnabled || !phoneRoot.mirrorFeedAvailable) {
-        phoneRoot.mirrorFeedRestarting = false;
-        return;
-      }
-
-      if (!phoneRoot.mirrorFeedRestarting) {
-        phoneRoot.mirrorFeedRestarting = true;
-        restart();
-        return;
-      }
-
-      phoneRoot.mirrorFeedError = "";
-      phoneRoot.mirrorFeedRestarting = false;
-    }
   }
 
   RectangularShadow {

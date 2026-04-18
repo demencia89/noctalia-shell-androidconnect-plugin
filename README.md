@@ -6,8 +6,6 @@
 
 If you want to support ongoing work on AndroidConnect and the surrounding Noctalia projects, sponsor the work through GitHub Sponsors at [@demencia89](https://github.com/sponsors/demencia89).
 
-Current release: `v1.0.0`
-
 This project is built on top of the original Noctalia `kde-connect` plugin. Credit and thanks to the original Noctalia KDE Connect plugin developers for the base plugin and architecture this work extends.
 
 Upstream base project:
@@ -36,25 +34,38 @@ Project repository:
 
 ## Current Status
 
-`AndroidConnect v1.0.0` is the first public release of this renamed and extended plugin package.
+Current plugin version: `1.2.2`
 
 The plugin is currently shaped for real user installs, not just local experimentation.
+
+Current first-run defaults:
+- `Phone Click Action` defaults to `Launch scrcpy`
+- Embedded mirror defaults to enabled
+- Wireless ADB defaults to enabled
+- Embedded audio defaults to off
 
 Known-good behavior currently preserved:
 - Live `Feed` mode works.
 - Manual `Fallback` mode is ADB screenshot mode, timer-driven at 80 ms.
 - The `Fallback` / `Feed` toggle persists across panel close and reopen.
-- The toggle is the left-most button in the top header row.
+- The `Fallback` / `Feed` toggle is the left-most button in the top header row.
+- The embedded audio toggle is present in the top header row, to the left of the Wi-Fi button.
 - Opening the plugin while `scrcpy` is already connected sends unlock-only, not Home.
 - The bottom Android nav row is hidden while `scrcpy` is connected.
 - The status/error card hides completely when there is nothing to show.
 
 Recent release-polish changes:
+- Added first-time setup guidance in plugin settings.
+- The panel now stays in setup/error state instead of trying to auto-start `scrcpy` when ADB is missing, unauthorized, offline, or the loopback feed is not ready.
 - Removed the destructive V4L2 consumer-kill recovery path.
+- Hardened command execution so configured `scrcpy` and ADB helper commands run as parsed argv instead of through a shell wrapper.
 - Made mirror snapshot and Wireless ADB QR temp files instance-scoped in `/tmp`.
 - Made ADB snapshot writes atomic to avoid stale or partially-written preview frames.
+- Matched the mobile network icon to the actual reported radio type, including distinct `LTE`, `4G`, and `5G` states.
+- Added user-facing notifications when Browse Files or Send File actions fail, so failures are visible instead of disappearing silently.
+- Suppressed transient status, warning, and error surfaces for the first 5 seconds after the drawer opens.
+- Delayed the embedded mirror fallback suggestion until the drawer has been open for 8 seconds and the live feed is still failing.
 - Kept the supported fallback path as snapshot mode only. Overlay fallback was not reintroduced.
-- Tagged this release as `v1.0.0`.
 
 ## Features
 
@@ -64,11 +75,9 @@ Recent release-polish changes:
 - Embedded in-panel Android mirror
 - Live V4L2 `Feed` mode for the embedded mirror
 - Manual snapshot `Fallback` mode for unstable feed environments
-- Optional embedded audio toggle in the top header row, off by default
+- Optional embedded audio toggle, off by default
 - ADB tap, swipe, text, key, and Android navigation input
 - Wireless ADB pairing and reconnect helpers
-- Per-device Wireless ADB host, port, and session preference persistence
-- Dependency/readiness checks for `scrcpy`, `adb`, QR pairing, and embedded audio support
 
 ## Dependencies
 
@@ -81,11 +90,6 @@ Required for mirror and Android input features:
 - `scrcpy`
 - `adb` from Android platform-tools
 - Qt Multimedia runtime for your distro, for example `qt6-multimedia`
-
-Required for embedded audio:
-- A `scrcpy` build with audio forwarding support
-- Android 11 or newer on the phone side
-- A working desktop audio output path
 
 Required for embedded live `Feed` mode:
 - `v4l2loopback`
@@ -110,28 +114,46 @@ Not versioned in this repository:
 3. Enable the plugin in Noctalia.
 4. Make sure KDE Connect is installed on both the desktop and phone, then pair the phone normally.
 
+## First-Time Setup
+
+If you want the current default experience, which is embedded `scrcpy` inside the panel:
+
+1. Install `scrcpy`, `adb`, Qt Multimedia, and `v4l2loopback`.
+2. On the phone, enable Developer options and USB debugging.
+3. Connect the phone over USB once, unlock it, and accept the USB debugging prompt for this computer.
+4. Create the V4L2 loopback device used by the embedded live feed.
+5. Open plugin settings and confirm:
+   - `Phone Click Action` is `Launch scrcpy`
+   - `Embed Mirror in Panel` is enabled
+   - `Loopback Video Device` matches your loopback node, for example `/dev/video10`
+   - `Loopback Device Label` matches the loopback label, for example `scrcpy-panel`
+6. Open the panel.
+
+If ADB or the loopback feed is not ready, the plugin will now stay in setup/error state and tell you what is missing instead of blindly launching a broken mirror session.
+
 ## Base Setup
 
 If you only want device status and KDE Connect actions:
 
 1. Confirm `kdeconnectd` is running.
 2. Enable the relevant KDE Connect phone-side plugins for battery, notifications, browse files, and remote actions.
-3. In plugin settings, keep `Phone Click Action` on `Wake device` if you do not want `scrcpy`.
+3. In plugin settings, change `Phone Click Action` to `Wake device` if you do not want `scrcpy`.
 
 ## scrcpy Setup
 
 If you want panel-launched `scrcpy`:
 
 1. Install `scrcpy` and `adb`.
-2. Set `Phone Click Action` to `Launch scrcpy`.
+2. Leave `Phone Click Action` on `Launch scrcpy`. This is the current default.
 3. Leave `scrcpy Command` as `scrcpy` or set your own command, for example a serial-specific launch command.
+4. Make sure the phone is authorized in `adb` before expecting panel control or unlock behavior.
 
 ## Embedded Mirror Setup
 
 If you want the phone rendered inside the panel:
 
 1. Keep `Phone Click Action` on `Launch scrcpy`.
-2. Enable `Embed Mirror in Panel`.
+2. Keep `Embed Mirror in Panel` enabled. This is the current default.
 3. Create a V4L2 loopback device.
    Example:
 
@@ -143,26 +165,15 @@ sudo modprobe v4l2loopback video_nr=10 card_label=scrcpy-panel exclusive_caps=1
    - `Loopback Video Device` to `/dev/video10`
    - `Loopback Device Label` to `scrcpy-panel`
    - `Embedded scrcpy Command` to a working base command, usually `scrcpy --no-audio --capture-orientation=@0`
+   - Leave embedded audio off unless you want it. You can toggle it from the speaker button in the panel header.
 5. Open the panel and start the mirror.
 
 Notes:
 - `Feed` is the preferred live mode.
 - `Fallback` is the supported manual snapshot mode.
+- The `Fallback` / `Feed` toggle is persistent across panel reopen.
 - If the feed is unavailable, verify that the loopback device exists, is writable, and matches the configured label.
-- The panel now surfaces readiness errors before launch when `scrcpy`, `adb`, or the loopback path are missing or unavailable.
-
-## Embedded Audio
-
-Embedded audio is off by default.
-
-1. Start with a working embedded mirror setup.
-2. Use the speaker button in the top header row, immediately left of the Wireless ADB button.
-3. If your local `scrcpy` build does not advertise audio support, the plugin will warn and keep the rest of the mirror workflow unchanged.
-
-Notes:
-- The default embedded command remains `scrcpy --no-audio --capture-orientation=@0`.
-- The audio toggle removes `--no-audio` only when audio is enabled.
-- If audio still does not play, confirm your `scrcpy` package supports audio forwarding and that desktop audio output is working normally.
+- If the phone is already mirrored when you open the plugin, AndroidConnect sends unlock-only and does not send Home.
 
 ## Wireless ADB Setup
 
@@ -173,9 +184,14 @@ Wireless ADB is optional, but it improves embedded input when USB is not availab
 3. Use either:
    - `Pair with QR code`
    - `Pair with code`
-4. After pairing, connect using the ADB port shown on the phone.
+4. Open the Wi-Fi button in the panel header.
+5. After pairing, connect using the ADB port shown on the phone.
 
-The plugin remembers the last successful host, port, and wireless-session preference per device, so multiple phones do not overwrite each other.
+The plugin can remember the last successful host and port for later reconnects.
+
+Notes:
+- Wireless ADB is optional. USB ADB is still the simplest and most reliable first setup path.
+- The Wireless ADB popup also has a cable-only mode if you want this plugin to avoid wireless fallback entirely.
 
 ## Browse Files Notes
 
@@ -185,6 +201,7 @@ If it fails:
 - Check that the KDE Connect SFTP feature is enabled on the phone.
 - Make sure `sshfs` and FUSE support are installed.
 - If your file manager is sandboxed, it may not be able to access the mounted path.
+- AndroidConnect now also shows a notification when Browse Files or Send File fails so the error stays visible while debugging.
 
 ## Development Notes
 

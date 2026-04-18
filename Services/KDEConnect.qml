@@ -4,6 +4,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Services.UI
 
 QtObject {
   id: root
@@ -23,7 +24,7 @@ QtObject {
   readonly property string usbSelectionSentinel: "__NOCTALIA_USB__"
   property bool scrcpyLaunching: false
   property bool scrcpyStopRequested: false
-  property string scrcpyShellCommand: ""
+  property var scrcpyCommandArgs: []
   property string scrcpyLaunchError: ""
   property string scrcpyLastStderr: ""
   property string scrcpyDeviceId: ""
@@ -34,6 +35,8 @@ QtObject {
   property string scrcpyFeedDevicePath: ""
   property string scrcpySessionMode: ""
   property string scrcpyActiveSerial: ""
+  property string scrcpyCleanupFeedDevicePath: ""
+  property string scrcpyCleanupWindowTitle: ""
   property string hyprClientsStdout: ""
   readonly property bool scrcpyRunning: scrcpySessionProc.running
   readonly property bool scrcpyWindowReady: scrcpyRunning && scrcpyWindowAddress !== ""
@@ -43,6 +46,8 @@ QtObject {
   property string wirelessAdbLastStderr: ""
   property string adbDevicesStdout: ""
   property string adbDevicesStderr: ""
+  property int adbDevicesExitCode: 0
+  property var adbDeviceStates: ({})
   property var adbConnectedSerials: []
   property bool adbHasUsbTransport: false
   property string adbDisplayInfoSerial: ""
@@ -212,6 +217,12 @@ QtObject {
     if (scrcpyRunning)
       return false;
 
+    const parsedCommand = parseCommandArgs(trimmedCommand);
+    if (parsedCommand.error !== "") {
+      scrcpyLaunchError = parsedCommand.error;
+      return false;
+    }
+
     scrcpyLaunching = true;
     scrcpyStopRequested = false;
     scrcpyLaunchError = "";
@@ -236,12 +247,12 @@ QtObject {
     v4l2SnapshotError = "";
     scrcpyLaunchStartedAtMs = Date.now();
     scrcpyFirstFrameLatencyMs = -1;
-    scrcpyShellCommand = "exec " + trimmedCommand;
+    scrcpyCommandArgs = parsedCommand.args;
     Logger.i("KDEConnect", "Launching scrcpy session:",
       "mode=" + scrcpySessionMode,
       "deviceId=" + scrcpyDeviceId,
       "serial=" + (isUsbSelectionSerial(launchSerial) ? "usb" : launchSerial),
-      "command=" + trimmedCommand);
+      "program=" + String(parsedCommand.args[0] || ""));
     scrcpySessionProc.running = true;
     return true;
   }
@@ -254,12 +265,105 @@ QtObject {
     scrcpySessionProc.signal(15);
   }
 
+  function forceStopScrcpyProcesses(feedDevicePath: string): void {
+    scrcpyCleanupFeedDevicePath = String(feedDevicePath || "").trim();
+    scrcpyCleanupWindowTitle = String(root.scrcpyWindowTitle || "").trim();
+
+    if (scrcpyRunning)
+      stopScrcpySession();
+
+    if (!scrcpyCleanupProc.running)
+      scrcpyCleanupProc.running = true;
+  }
+
   function shellQuote(value: string): string {
     return "'" + String(value).replace(/'/g, "'\"'\"'") + "'";
   }
 
   function normalizeShellCommand(commandString: string): string {
     return String(commandString || "").replace(/\s+/g, " ").trim();
+  }
+
+  function parseCommandArgs(commandString: string) {
+    const source = String(commandString || "").trim();
+    const parsedArgs = [];
+    let current = "";
+    let quoteChar = "";
+    let escaping = false;
+    let tokenStarted = false;
+
+    if (source === "")
+      return { error: "missing_command", args: [] };
+
+    for (let i = 0; i < source.length; ++i) {
+      const ch = source.charAt(i);
+
+      if (escaping) {
+        current += ch;
+        escaping = false;
+        tokenStarted = true;
+        continue;
+      }
+
+      if (quoteChar === "'") {
+        if (ch === "'")
+          quoteChar = "";
+        else
+          current += ch;
+        tokenStarted = true;
+        continue;
+      }
+
+      if (quoteChar === "\"") {
+        if (ch === "\"") {
+          quoteChar = "";
+        } else if (ch === "\\") {
+          escaping = true;
+        } else {
+          current += ch;
+        }
+        tokenStarted = true;
+        continue;
+      }
+
+      if (ch === "\\") {
+        escaping = true;
+        tokenStarted = true;
+        continue;
+      }
+
+      if (ch === "'" || ch === "\"") {
+        quoteChar = ch;
+        tokenStarted = true;
+        continue;
+      }
+
+      if (/\s/.test(ch)) {
+        if (tokenStarted) {
+          parsedArgs.push(current);
+          current = "";
+          tokenStarted = false;
+        }
+        continue;
+      }
+
+      current += ch;
+      tokenStarted = true;
+    }
+
+    if (escaping)
+      return { error: "Command ends with an unfinished escape.", args: [] };
+
+    if (quoteChar !== "")
+      return { error: "Command has an unterminated quote.", args: [] };
+
+    if (tokenStarted)
+      parsedArgs.push(current);
+
+    if (parsedArgs.length === 0 || String(parsedArgs[0] || "").trim() === "")
+      return { error: "missing_command", args: [] };
+
+    return { error: "", args: parsedArgs };
   }
 
   function isUsbSelectionSerial(serial: string): bool {
@@ -281,22 +385,20 @@ QtObject {
     let command = normalizeShellCommand(commandString);
     const preset = String(presetName || "").trim().toLowerCase();
     let bitrateOption = "--video-bit-rate=8M";
-    let maxSizeOption = "--max-size=1600";
+    let maxFpsOption = "--max-fps=60";
 
     if (command === "")
       return "";
 
     if (preset === "quality") {
       bitrateOption = "--video-bit-rate=10M";
-      maxSizeOption = "--max-size=1920";
     } else if (preset === "latency") {
       bitrateOption = "--video-bit-rate=6M";
-      maxSizeOption = "--max-size=1280";
+      maxFpsOption = "--max-fps=60";
     }
 
-    command = appendScrcpyOption(command, /(^|\s)--max-fps(?:=\S+|\s+\S+)\b/, "--max-fps=60");
+    command = appendScrcpyOption(command, /(^|\s)--max-fps(?:=\S+|\s+\S+)\b/, maxFpsOption);
     command = appendScrcpyOption(command, /(^|\s)(?:-b|--video-bit-rate)(?:=\S+|\s+\S+)\b/, bitrateOption);
-    command = appendScrcpyOption(command, /(^|\s)(?:-m|--max-size)(?:=\S+|\s+\S+)\b/, maxSizeOption);
     command = appendScrcpyOption(command, /(^|\s)--video-codec(?:=\S+|\s+\S+)\b/, "--video-codec=h264");
 
     if (feedMode)
@@ -486,22 +588,14 @@ QtObject {
     return true;
   }
 
-  function runWirelessAdbShellCommand(commandString: string, useExecWrapper: bool): bool {
-    const trimmedCommand = (commandString || "").trim();
-    if (trimmedCommand === "") {
-      wirelessAdbFinished(false, "missing_command");
+  function enableWirelessAdb(commandString: string): bool {
+    const parsedCommand = parseCommandArgs(commandString);
+    if (parsedCommand.error !== "") {
+      wirelessAdbFinished(false, parsedCommand.error);
       return false;
     }
 
-    return runWirelessAdbCommandArgs([
-      "bash",
-      "-lc",
-      useExecWrapper === false ? trimmedCommand : ("exec " + trimmedCommand)
-    ]);
-  }
-
-  function enableWirelessAdb(commandString: string): bool {
-    return runWirelessAdbShellCommand(commandString, true);
+    return runWirelessAdbCommandArgs(parsedCommand.args);
   }
 
   function refreshAdbDevices(): bool {
@@ -510,6 +604,7 @@ QtObject {
 
     adbDevicesStdout = "";
     adbDevicesStderr = "";
+    adbDevicesExitCode = 0;
     adbDevicesProc.running = true;
     return true;
   }
@@ -884,6 +979,36 @@ QtObject {
     return "file://" + encodeURI(rawPath);
   }
 
+  function deviceNameForId(deviceId: string): string {
+    const trimmedDeviceId = String(deviceId || "").trim();
+    if (trimmedDeviceId === "")
+      return "device";
+
+    const matchedDevice = (devices || []).find(device => String(device?.id || "").trim() === trimmedDeviceId);
+    const name = String(matchedDevice?.name || "").trim();
+    return name !== "" ? name : trimmedDeviceId;
+  }
+
+  function formatProcessFailure(action: string, deviceId: string, stderrText: string, exitCode: int): string {
+    const actionLabel = String(action || "").trim() !== "" ? String(action).trim() : "Operation";
+    const targetLabel = deviceNameForId(deviceId);
+    const details = String(stderrText || "").trim();
+
+    if (details !== "")
+      return actionLabel + " failed for " + targetLabel + ": " + details;
+
+    if (exitCode !== 0)
+      return actionLabel + " failed for " + targetLabel + " (exit code " + exitCode + ").";
+
+    return actionLabel + " failed for " + targetLabel + ".";
+  }
+
+  function notifyProcessFailure(action: string, deviceId: string, stderrText: string, exitCode: int): void {
+    const message = formatProcessFailure(action, deviceId, stderrText, exitCode);
+    Logger.w("KDEConnect", message);
+    ToastService.showError(message);
+  }
+
   property Process detectBusctlProc: Process {
     command: ["which", "busctl"]
     stdout: StdioCollector {
@@ -1202,12 +1327,26 @@ QtObject {
     Process {
       id: mountProc
       property string deviceId: ""
+      property string stderrText: ""
       command: busctlCall("/modules/kdeconnect/devices/" + deviceId + "/sftp", "org.kde.kdeconnect.device.sftp", "mountAndWait")
       stdout: StdioCollector {
         onStreamFinished: rootDirProc.running = true
       }
+      stderr: StdioCollector {
+        onStreamFinished: {
+          mountProc.stderrText = text.trim();
+        }
+      }
+
+      onExited: (exitCode, exitStatus) => {
+        if (exitCode !== 0) {
+          root.notifyProcessFailure("Browse device files", mountProc.deviceId, mountProc.stderrText, exitCode);
+          mountProc.destroy();
+        }
+      }
 
       property Process rootDirProc: Process {
+        property string stderrText: ""
         command: busctlCall("/modules/kdeconnect/devices/" + mountProc.deviceId + "/sftp", "org.kde.kdeconnect.device.sftp", "getDirectories")
         stdout: StdioCollector {
           onStreamFinished: {
@@ -1217,15 +1356,27 @@ QtObject {
               : null;
             const path = directoryEntry ? String(Object.keys(directoryEntry)[0] || "").trim() : "";
             if (path === "") {
-              Logger.w("KDEConnect", "No SFTP directories returned for device:", mountProc.deviceId);
+              root.notifyProcessFailure("Browse device files", mountProc.deviceId, "No SFTP directories were returned.", 0);
               mountProc.destroy();
               return;
             }
 
-            if (!Qt.openUrlExternally("file://" + path)) {
-              Logger.e("KDEConnect", "Failed to open file manager for path:", path);
+            if (!Qt.openUrlExternally(root.normalizedFileShareUrl(path))) {
+              root.notifyProcessFailure("Browse device files", mountProc.deviceId, "Failed to open the file manager for " + path + ".", 0);
             }
 
+            mountProc.destroy();
+          }
+        }
+        stderr: StdioCollector {
+          onStreamFinished: {
+            rootDirProc.stderrText = text.trim();
+          }
+        }
+
+        onExited: (exitCode, exitStatus) => {
+          if (exitCode !== 0) {
+            root.notifyProcessFailure("Browse device files", mountProc.deviceId, rootDirProc.stderrText, exitCode);
             mountProc.destroy();
           }
         }
@@ -1281,16 +1432,25 @@ QtObject {
       id: proc
       property string deviceId: ""
       property string fileUrl: ""
+      property string stderrText: ""
       command: busctlCall(
         "/modules/kdeconnect/devices/" + deviceId + "/share",
         "org.kde.kdeconnect.device.share",
         "shareUrls",
         [ "as", "1", fileUrl ]
       )
-      stdout: StdioCollector {
+      stdout: StdioCollector {}
+      stderr: StdioCollector {
         onStreamFinished: {
-          proc.destroy()
+          proc.stderrText = text.trim();
         }
+      }
+
+      onExited: (exitCode, exitStatus) => {
+        if (exitCode !== 0)
+          root.notifyProcessFailure("Send file", proc.deviceId, proc.stderrText, exitCode);
+
+        proc.destroy();
       }
     }
   }
@@ -1366,6 +1526,7 @@ QtObject {
       "-lc",
       "tmp_path=" + root.shellQuote(root.snapshotWriteTempPath)
         + "; final_path=" + root.shellQuote(root.v4l2SnapshotPath)
+        + "; trap 'rm -f -- \"$tmp_path\"' EXIT"
         + "; timeout -k 0.4s 1.8s "
         + root.shellJoinArgs(root.adbCommand(root.adbSnapshotSerial, ["exec-out", "screencap", "-p"]))
         + " > \"$tmp_path\""
@@ -1453,7 +1614,7 @@ QtObject {
   property Process scrcpySessionProc: Process {
     id: scrcpySessionProc
     running: false
-    command: ["sh", "-lc", root.scrcpyShellCommand]
+    command: root.scrcpyCommandArgs
 
     stdout: StdioCollector {}
 
@@ -1500,7 +1661,7 @@ QtObject {
       }
 
       root.scrcpyStopRequested = false;
-      root.scrcpyShellCommand = "";
+      root.scrcpyCommandArgs = [];
       root.scrcpyDeviceId = "";
       root.scrcpyWindowAddress = "";
       root.scrcpyWindowFloating = false;
@@ -1526,6 +1687,39 @@ QtObject {
       root.snapshotWriteTempPath = "";
       root.v4l2SnapshotVersion = 0;
       root.v4l2SnapshotError = "";
+    }
+  }
+
+  property Process scrcpyCleanupProc: Process {
+    id: scrcpyCleanupProc
+    running: false
+    command: ["sh", "-lc",
+      "device=" + root.shellQuote(root.scrcpyCleanupFeedDevicePath)
+      + "; title=" + root.shellQuote(root.scrcpyCleanupWindowTitle)
+      + "; for pid in $(pgrep -x scrcpy || true); do"
+      + " cmd=$(tr '\\0' '\\n' </proc/$pid/cmdline 2>/dev/null || true)"
+      + "; if [ -n \"$device\" ] && printf '%s\\n' \"$cmd\" | grep -Fqx -- \"--v4l2-sink=$device\"; then"
+      + " kill -TERM \"$pid\" 2>/dev/null || true; continue"
+      + "; fi"
+      + "; if [ -n \"$title\" ] && printf '%s\\n' \"$cmd\" | grep -Fqx -- \"--window-title=$title\"; then"
+      + " kill -TERM \"$pid\" 2>/dev/null || true"
+      + "; fi"
+      + "; done"
+      + "; sleep 0.35"
+      + "; for pid in $(pgrep -x scrcpy || true); do"
+      + " cmd=$(tr '\\0' '\\n' </proc/$pid/cmdline 2>/dev/null || true)"
+      + "; if [ -n \"$device\" ] && printf '%s\\n' \"$cmd\" | grep -Fqx -- \"--v4l2-sink=$device\"; then"
+      + " kill -KILL \"$pid\" 2>/dev/null || true; continue"
+      + "; fi"
+      + "; if [ -n \"$title\" ] && printf '%s\\n' \"$cmd\" | grep -Fqx -- \"--window-title=$title\"; then"
+      + " kill -KILL \"$pid\" 2>/dev/null || true"
+      + "; fi"
+      + "; done"
+    ]
+
+    onExited: (exitCode, exitStatus) => {
+      root.scrcpyCleanupFeedDevicePath = "";
+      root.scrcpyCleanupWindowTitle = "";
     }
   }
 
@@ -1578,6 +1772,7 @@ QtObject {
 
     onExited: (exitCode, exitStatus) => {
       const connectedSerials = [];
+      const deviceStates = ({});
       let hasUsbTransport = false;
 
       if (exitCode === 0 && root.adbDevicesStdout !== "") {
@@ -1593,6 +1788,9 @@ QtObject {
           const serial = String(columns[0] || "").trim();
           const state = String(columns[1] || "").trim();
 
+          if (serial !== "")
+            deviceStates[serial] = state;
+
           if (serial === "" || state !== "device")
             continue;
 
@@ -1606,6 +1804,8 @@ QtObject {
           "stderr=" + root.adbDevicesStderr);
       }
 
+      root.adbDevicesExitCode = exitCode;
+      root.adbDeviceStates = deviceStates;
       root.adbConnectedSerials = connectedSerials;
       root.adbHasUsbTransport = hasUsbTransport;
       root.adbDevicesRefreshed();

@@ -160,8 +160,8 @@
       "description": "Hide the bar button entirely if no device is connected"
     },
     "iconColor": {
-      "label": "Icon Color",
-      "desc": "Color of the icon in the bar"
+      "label": "Widget Icon Color",
+      "desc": "Color of the AndroidConnect bar widget icon"
     },
     "phone-action": {
       "label": "Phone Click Action",

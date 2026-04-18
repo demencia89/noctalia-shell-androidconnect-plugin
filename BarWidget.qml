@@ -1,10 +1,8 @@
 import QtQuick
-import QtQuick.Controls
 import Quickshell
 import qs.Commons
 import qs.Modules.Bar.Extras
 import qs.Modules.Panels.Settings
-import qs.Services.Hardware
 import qs.Services.UI
 import qs.Widgets
 import "./Services"
@@ -32,10 +30,50 @@ Item {
 
   property bool hideIfNoDeviceConnected: cfg.hideIfNoDeviceConnected ?? defaults.hideIfNoDeviceConnected ?? false
   property string iconColorKey: cfg.iconColor ?? defaults.iconColor ?? "none"
+  readonly property string wirelessAdbConnectHost: cfg.wirelessAdbConnectHost ?? defaults.wirelessAdbConnectHost ?? ""
+  readonly property string activeWirelessAdbSerial: {
+    const host = String(wirelessAdbConnectHost || "").trim();
+    if (host === "")
+      return "";
+
+    return KDEConnect.adbConnectedSerialForHost(host);
+  }
+  readonly property string transportIcon: {
+    if (!KDEConnect.daemonAvailable || KDEConnect.mainDevice === null || !KDEConnect.mainDevice.reachable)
+      return "device-mobile-off";
+
+    if (KDEConnect.adbHasUsbTransport)
+      return "device-mobile-bolt";
+
+    if (activeWirelessAdbSerial !== "")
+      return "device-mobile";
+
+    return "device-mobile";
+  }
 
   visible: !hideIfNoDeviceConnected ? true : KDEConnect.anyDevicesConnected;
   opacity: (!hideIfNoDeviceConnected ? true : KDEConnect.anyDevicesConnected) ? 1.0 : 0.0;
 
+  NPopupContextMenu {
+    id: contextMenu
+
+    model: [
+      {
+        "label": I18n.tr("actions.widget-settings"),
+        "action": "settings",
+        "icon": "settings"
+      }
+    ]
+
+    onTriggered: action => {
+      contextMenu.close();
+      PanelService.closeContextMenu(root.screen);
+
+      if (action === "settings" && pluginApi?.manifest) {
+        BarService.openPluginSettings(root.screen, pluginApi.manifest);
+      }
+    }
+  }
 
   BarPill {
     id: pill
@@ -43,8 +81,7 @@ Item {
     screen: root.screen
     oppositeDirection: BarService.getPillDirection(root)
     customIconColor: Color.resolveColorKeyOptional(root.iconColorKey)
-    customTextColor: Color.resolveColorKeyOptional(root.textColorKey)
-    icon: KDEConnectUtils.getConnectionStateIcon(KDEConnect.mainDevice, KDEConnect.daemonAvailable)
+    icon: root.transportIcon
     autoHide: false // Important to be false so we can hover as long as we want
     text: !KDEConnect.daemonAvailable || KDEConnect.mainDevice === null || KDEConnect.mainDevice.battery === -1 ? "" : (KDEConnect.mainDevice.battery + "%")
     tooltipText: pluginApi?.tr("bar.tooltip")
@@ -52,6 +89,9 @@ Item {
       if (pluginApi) {
         pluginApi.openPanel(root.screen);
       }
+    }
+    onRightClicked: {
+      PanelService.showContextMenu(contextMenu, root, root.screen);
     }
   }
 }
