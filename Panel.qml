@@ -40,7 +40,6 @@ Item {
   readonly property string scrcpyCommand: cfg.scrcpyCommand ?? defaults.scrcpyCommand ?? "scrcpy"
   readonly property bool scrcpyStopOnPanelClose: cfg.scrcpyStopOnPanelClose ?? defaults.scrcpyStopOnPanelClose ?? true
   readonly property string wirelessAdbCommand: cfg.wirelessAdbCommand ?? defaults.wirelessAdbCommand ?? "adb tcpip 5555"
-  readonly property bool embeddedMirrorEnabled: cfg.embeddedMirrorEnabled ?? defaults.embeddedMirrorEnabled ?? true
   readonly property string embeddedScrcpyCommand: cfg.embeddedScrcpyCommand ?? defaults.embeddedScrcpyCommand ?? "scrcpy --no-audio --capture-orientation=@0"
   property string mirrorPerformancePreset: cfg.mirrorPerformancePreset ?? defaults.mirrorPerformancePreset ?? "balanced"
   readonly property string embeddedVideoEncoder: cfg.embeddedVideoEncoder ?? defaults.embeddedVideoEncoder ?? ""
@@ -1469,7 +1468,7 @@ Item {
   }
 
   function embeddedMirrorModeEnabled() {
-    return phoneClickAction === "scrcpy" && embeddedMirrorEnabled;
+    return phoneClickAction === "scrcpy";
   }
 
   function embeddedMirrorFeedConfigured() {

@@ -40,7 +40,6 @@ The plugin is currently shaped for real user installs, not just local experiment
 
 Current first-run defaults:
 - `Phone Click Action` defaults to `Launch scrcpy`
-- Embedded mirror defaults to enabled
 - Wireless ADB defaults to enabled
 - Embedded audio defaults to off
 
@@ -124,7 +123,6 @@ If you want the current default experience, which is embedded `scrcpy` inside th
 4. Create the V4L2 loopback device used by the embedded live feed.
 5. Open plugin settings and confirm:
    - `Phone Click Action` is `Launch scrcpy`
-   - `Embed Mirror in Panel` is enabled
    - `Loopback Video Device` matches your loopback node, for example `/dev/video10`
    - `Loopback Device Label` matches the loopback label, for example `scrcpy-panel`
 6. Open the panel.
@@ -153,7 +151,7 @@ If you want panel-launched `scrcpy`:
 If you want the phone rendered inside the panel:
 
 1. Keep `Phone Click Action` on `Launch scrcpy`.
-2. Keep `Embed Mirror in Panel` enabled. This is the current default.
+2. Make sure your loopback feed is configured and available.
 3. Create a V4L2 loopback device.
    Example:
 

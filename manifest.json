@@ -31,7 +31,6 @@
       "phoneClickAction": "scrcpy",
       "scrcpyCommand": "scrcpy",
       "scrcpyStopOnPanelClose": true,
-      "embeddedMirrorEnabled": true,
       "embeddedScrcpyCommand": "scrcpy --no-audio --capture-orientation=@0",
       "embeddedMirrorAudioEnabled": false,
       "mirrorPerformancePreset": "balanced",
