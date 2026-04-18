@@ -55,8 +55,11 @@ Recent release-polish changes:
 - Embedded in-panel Android mirror
 - Live V4L2 `Feed` mode for the embedded mirror
 - Manual snapshot `Fallback` mode for unstable feed environments
+- Optional embedded audio toggle in the top header row, off by default
 - ADB tap, swipe, text, key, and Android navigation input
 - Wireless ADB pairing and reconnect helpers
+- Per-device Wireless ADB host, port, and session preference persistence
+- Dependency/readiness checks for `scrcpy`, `adb`, QR pairing, and embedded audio support
 
 ## Dependencies
 
@@ -69,6 +72,11 @@ Required for mirror and Android input features:
 - `scrcpy`
 - `adb` from Android platform-tools
 - Qt Multimedia runtime for your distro, for example `qt6-multimedia`
+
+Required for embedded audio:
+- A `scrcpy` build with audio forwarding support
+- Android 11 or newer on the phone side
+- A working desktop audio output path
 
 Required for embedded live `Feed` mode:
 - `v4l2loopback`
@@ -132,6 +140,20 @@ Notes:
 - `Feed` is the preferred live mode.
 - `Fallback` is the supported manual snapshot mode.
 - If the feed is unavailable, verify that the loopback device exists, is writable, and matches the configured label.
+- The panel now surfaces readiness errors before launch when `scrcpy`, `adb`, or the loopback path are missing or unavailable.
+
+## Embedded Audio
+
+Embedded audio is off by default.
+
+1. Start with a working embedded mirror setup.
+2. Use the speaker button in the top header row, immediately left of the Wireless ADB button.
+3. If your local `scrcpy` build does not advertise audio support, the plugin will warn and keep the rest of the mirror workflow unchanged.
+
+Notes:
+- The default embedded command remains `scrcpy --no-audio --capture-orientation=@0`.
+- The audio toggle removes `--no-audio` only when audio is enabled.
+- If audio still does not play, confirm your `scrcpy` package supports audio forwarding and that desktop audio output is working normally.
 
 ## Wireless ADB Setup
 
@@ -144,7 +166,7 @@ Wireless ADB is optional, but it improves embedded input when USB is not availab
    - `Pair with code`
 4. After pairing, connect using the ADB port shown on the phone.
 
-The plugin can remember the last successful host and port for later reconnects.
+The plugin remembers the last successful host, port, and wireless-session preference per device, so multiple phones do not overwrite each other.
 
 ## Browse Files Notes
 

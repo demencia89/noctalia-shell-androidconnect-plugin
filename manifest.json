@@ -47,10 +47,12 @@
       "phoneSizePresetKey": "small",
       "phoneSizeStepDirection": 1,
       "wirelessAdbCommand": "adb tcpip 5555",
+      "wirelessAdbSessionPreferred": false,
       "wirelessAdbPairHost": "",
       "wirelessAdbPairPort": "",
       "wirelessAdbConnectHost": "",
-      "wirelessAdbConnectPort": ""
+      "wirelessAdbConnectPort": "",
+      "wirelessAdbProfiles": {}
     }
   }
 }

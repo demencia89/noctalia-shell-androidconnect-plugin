@@ -65,9 +65,15 @@ Item {
   property string wirelessAdbQrSecret: ""
   property bool wirelessAdbQrPendingLaunch: false
   property int wirelessAdbQrImageVersion: 0
-  property bool wirelessAdbSessionPreferred: false
+  property bool wirelessAdbSessionPreferred: Boolean(
+    cfg.wirelessAdbSessionPreferred
+    ?? defaults.wirelessAdbSessionPreferred
+    ?? false
+  )
   property bool lastKnownUsbTransport: false
   property var cachedDeviceTelemetry: initialCachedDeviceTelemetry()
+  property var wirelessAdbProfiles: initialWirelessAdbProfiles()
+  property bool wirelessAdbProfileLoadInProgress: false
   readonly property string tempInstanceToken: makeTempInstanceToken()
   readonly property string wirelessAdbQrImagePath: "/tmp/androidconnect-wireless-adb-" + tempInstanceToken + ".png"
   readonly property string embeddedMirrorSnapshotPath: "/tmp/androidconnect-mirror-" + tempInstanceToken + ".jpg"
@@ -111,6 +117,13 @@ Item {
   property bool embeddedMirrorUsbRestoreRecoveryPending: false
   property bool panelOpenUnlockPending: false
   property int panelOpenUnlockRetriesRemaining: 0
+  property bool dependencyCheckKnown: false
+  property string dependencyCheckStdout: ""
+  property bool scrcpyDependencyAvailable: true
+  property bool adbDependencyAvailable: true
+  property bool qrencodeDependencyAvailable: true
+  property bool embeddedAudioSupportKnown: false
+  property bool embeddedAudioSupported: true
   readonly property bool passthroughHoleEnabled: embeddedMirrorModeEnabled()
     && KDEConnect.scrcpyRunning
     && KDEConnect.scrcpyWindowReady
@@ -253,6 +266,15 @@ Item {
   }
 
   Timer {
+    id: dependencyCheckTimer
+    interval: 140
+    repeat: false
+    onTriggered: {
+      root.refreshDependencyStatus();
+    }
+  }
+
+  Timer {
     id: adbDevicesRefreshTimer
     interval: 2500
     repeat: true
@@ -280,6 +302,8 @@ Item {
       Logger.i("KDEConnect", "Panel initialized");
     }
     root.syncBackgroundRefreshPolicy();
+    root.loadWirelessAdbProfileForDevice(KDEConnect.mainDevice);
+    root.scheduleDependencyCheck();
     KDEConnect.refreshAdbDevices();
     Qt.callLater(function() {
       root.refreshEmbeddedVideoDeviceAccess();
@@ -347,8 +371,10 @@ Item {
       const usbTransportRestored = !root.lastKnownUsbTransport && KDEConnect.adbHasUsbTransport;
       root.lastKnownUsbTransport = KDEConnect.adbHasUsbTransport;
 
-      if (usbTransportRestored)
+      if (usbTransportRestored) {
         root.wirelessAdbSessionPreferred = false;
+        root.persistWirelessAdbSettings();
+      }
 
       if ((usbTransportLost || usbTransportRestored) && root.embeddedMirrorFeedConfigured()) {
         const preview = root.activePhonePreview;
@@ -394,6 +420,7 @@ Item {
     }
 
     function onMainDeviceChanged() {
+      root.loadWirelessAdbProfileForDevice(KDEConnect.mainDevice);
       if (KDEConnect.mainDevice)
         root.updateCachedTelemetryForDevice(KDEConnect.mainDevice);
 
@@ -494,6 +521,8 @@ Item {
   onVisibleChanged: {
     root.syncBackgroundRefreshPolicy();
     if (visible) {
+      root.loadWirelessAdbProfileForDevice(KDEConnect.mainDevice);
+      root.scheduleDependencyCheck();
       KDEConnect.refreshAdbDevices();
       if (KDEConnect.daemonAvailable)
         KDEConnect.refreshDevices();
@@ -520,10 +549,22 @@ Item {
   }
 
   onMirrorReduceBackgroundPollingChanged: root.syncBackgroundRefreshPolicy()
-  onEmbeddedMirrorEnabledChanged: root.syncBackgroundRefreshPolicy()
-  onPhoneClickActionChanged: root.syncBackgroundRefreshPolicy()
+  onEmbeddedMirrorEnabledChanged: {
+    root.syncBackgroundRefreshPolicy();
+    root.scheduleDependencyCheck();
+  }
+  onPhoneClickActionChanged: {
+    root.syncBackgroundRefreshPolicy();
+    root.scheduleDependencyCheck();
+  }
   onEmbeddedMirrorForceSnapshotFallbackChanged: root.persistEmbeddedMirrorSnapshotFallbackMode()
-  onEmbeddedMirrorAudioEnabledChanged: root.persistEmbeddedMirrorAudioMode()
+  onEmbeddedMirrorAudioEnabledChanged: {
+    root.persistEmbeddedMirrorAudioMode();
+    root.scheduleDependencyCheck();
+  }
+  onWirelessAdbSessionPreferredChanged: root.persistWirelessAdbSettings()
+  onScrcpyCommandChanged: root.scheduleDependencyCheck()
+  onEmbeddedScrcpyCommandChanged: root.scheduleDependencyCheck()
 
   function handlePhoneClick(preview) {
     if (KDEConnect.mainDevice === null)
@@ -658,6 +699,10 @@ Item {
     if ((scrcpyCommand || "").trim() === "")
       return pluginApi?.tr("panel.scrcpy.not-configured-title") || "scrcpy Not Configured";
 
+    const dependencyTitle = scrcpyDependencyIssueTitle();
+    if (dependencyTitle !== "")
+      return dependencyTitle;
+
     if (KDEConnect.scrcpyLaunchError !== "")
       return pluginApi?.tr("panel.scrcpy.error-title") || "scrcpy Error";
 
@@ -677,6 +722,10 @@ Item {
     if ((scrcpyCommand || "").trim() === "")
       return pluginApi?.tr("panel.scrcpy.not-configured-description") || "Set a scrcpy command in the plugin settings";
 
+    const dependencySubtitle = scrcpyDependencyIssueSubtitle();
+    if (dependencySubtitle !== "")
+      return dependencySubtitle;
+
     if (KDEConnect.scrcpyLaunchError === "missing_command")
       return pluginApi?.tr("panel.scrcpy.missing-command-description") || "Set a scrcpy command in the plugin settings";
 
@@ -695,12 +744,192 @@ Item {
     return (text === "" || text.startsWith("!!")) ? fallback : text;
   }
 
+  function shellCommandExecutable(commandString) {
+    const command = String(commandString || "").trim();
+    if (command === "")
+      return "";
+
+    const tokens = [];
+    let index = 0;
+    while (index < command.length) {
+      while (index < command.length && /\s/.test(command[index]))
+        index += 1;
+
+      if (index >= command.length)
+        break;
+
+      if ("|&;<>`$()".indexOf(command[index]) !== -1)
+        return "";
+
+      let token = "";
+      let quote = "";
+      while (index < command.length) {
+        const char = command[index];
+        if (quote === "") {
+          if (/\s/.test(char))
+            break;
+
+          if (char === "'" || char === "\"") {
+            quote = char;
+            index += 1;
+            continue;
+          }
+
+          if (char === "\\") {
+            index += 1;
+            if (index < command.length)
+              token += command[index];
+            index += 1;
+            continue;
+          }
+
+          if ("|&;<>`$()".indexOf(char) !== -1)
+            return tokens.length > 0 ? tokens[0] : "";
+
+          token += char;
+          index += 1;
+          continue;
+        }
+
+        if (char === quote) {
+          quote = "";
+          index += 1;
+          continue;
+        }
+
+        if (char === "\\" && quote === "\"") {
+          index += 1;
+          if (index < command.length)
+            token += command[index];
+          index += 1;
+          continue;
+        }
+
+        token += char;
+        index += 1;
+      }
+
+      if (quote !== "")
+        return "";
+
+      if (token !== "")
+        tokens.push(token);
+    }
+
+    let tokenIndex = 0;
+    while (tokenIndex < tokens.length && tokens[tokenIndex] === "exec")
+      tokenIndex += 1;
+
+    if (tokenIndex < tokens.length && tokens[tokenIndex] === "env") {
+      tokenIndex += 1;
+      while (tokenIndex < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=.*/.test(tokens[tokenIndex]))
+        tokenIndex += 1;
+    }
+
+    while (tokenIndex < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=.*/.test(tokens[tokenIndex]))
+      tokenIndex += 1;
+
+    const executable = tokenIndex < tokens.length ? String(tokens[tokenIndex] || "").trim() : "";
+    if (executable === "sh" || executable === "bash")
+      return "";
+
+    return executable;
+  }
+
+  function configuredScrcpyExecutable() {
+    return shellCommandExecutable(
+      embeddedMirrorModeEnabled() ? embeddedScrcpyCommand : scrcpyCommand
+    );
+  }
+
+  function embeddedAudioScrcpyExecutable() {
+    return shellCommandExecutable(embeddedScrcpyCommand);
+  }
+
   function initialCachedDeviceTelemetry() {
     const rawValue = cfg.cachedDeviceTelemetry ?? defaults.cachedDeviceTelemetry ?? ({});
     if (rawValue && typeof rawValue === "object")
       return rawValue;
 
     return ({});
+  }
+
+  function initialWirelessAdbProfiles() {
+    const rawValue = cfg.wirelessAdbProfiles ?? defaults.wirelessAdbProfiles ?? ({});
+    if (rawValue && typeof rawValue === "object" && !Array.isArray(rawValue))
+      return rawValue;
+
+    return ({});
+  }
+
+  function normalizeWirelessAdbProfile(profile) {
+    const current = (profile && typeof profile === "object") ? profile : ({});
+    return {
+      pairHost: String(current.pairHost || "").trim(),
+      pairPort: String(current.pairPort || "").trim(),
+      connectHost: String(current.connectHost || "").trim(),
+      connectPort: String(current.connectPort || "").trim(),
+      sessionPreferred: Boolean(current.sessionPreferred)
+    };
+  }
+
+  function wirelessAdbProfileHasValue(profile) {
+    const current = normalizeWirelessAdbProfile(profile);
+    return current.pairHost !== ""
+      || current.pairPort !== ""
+      || current.connectHost !== ""
+      || current.connectPort !== ""
+      || current.sessionPreferred;
+  }
+
+  function legacyWirelessAdbProfile() {
+    return normalizeWirelessAdbProfile({
+      pairHost: cfg.wirelessAdbPairHost ?? defaults.wirelessAdbPairHost ?? "",
+      pairPort: cfg.wirelessAdbPairPort ?? defaults.wirelessAdbPairPort ?? "",
+      connectHost: cfg.wirelessAdbConnectHost ?? defaults.wirelessAdbConnectHost ?? "",
+      connectPort: cfg.wirelessAdbConnectPort ?? defaults.wirelessAdbConnectPort ?? "",
+      sessionPreferred: cfg.wirelessAdbSessionPreferred ?? defaults.wirelessAdbSessionPreferred ?? false
+    });
+  }
+
+  function wirelessAdbProfileKey(device) {
+    return String(device?.id || "").trim();
+  }
+
+  function currentWirelessAdbProfile() {
+    return normalizeWirelessAdbProfile({
+      pairHost: wirelessAdbPairHost,
+      pairPort: wirelessAdbPairPort,
+      connectHost: wirelessAdbConnectHost,
+      connectPort: wirelessAdbConnectPort,
+      sessionPreferred: wirelessAdbSessionPreferred
+    });
+  }
+
+  function wirelessAdbProfileForDevice(device) {
+    const key = wirelessAdbProfileKey(device);
+    const profiles = wirelessAdbProfiles || ({});
+    if (key !== "" && profiles[key] && typeof profiles[key] === "object")
+      return normalizeWirelessAdbProfile(profiles[key]);
+
+    return legacyWirelessAdbProfile();
+  }
+
+  function applyWirelessAdbProfile(profile) {
+    const current = normalizeWirelessAdbProfile(profile);
+    wirelessAdbProfileLoadInProgress = true;
+    wirelessAdbPairHost = current.pairHost;
+    wirelessAdbPairPort = current.pairPort;
+    wirelessAdbConnectHost = current.connectHost;
+    wirelessAdbConnectPort = current.connectPort;
+    wirelessAdbSessionPreferred = current.sessionPreferred;
+    wirelessAdbPairingCode = "";
+    wirelessAdbStatusMessage = "";
+    wirelessAdbProfileLoadInProgress = false;
+  }
+
+  function loadWirelessAdbProfileForDevice(device) {
+    applyWirelessAdbProfile(wirelessAdbProfileForDevice(device));
   }
 
   function telemetryCacheKey(device) {
@@ -754,6 +983,99 @@ Item {
       [key]: next
     });
     persistCachedDeviceTelemetry();
+  }
+
+  function parseDependencyCheckValue(values, key, defaultValue) {
+    const rawValue = String(values[key] ?? "").trim();
+    if (rawValue === "1")
+      return true;
+    if (rawValue === "0")
+      return false;
+    return defaultValue;
+  }
+
+  function scheduleDependencyCheck() {
+    dependencyCheckTimer.restart();
+  }
+
+  function refreshDependencyStatus() {
+    if (dependencyCheckProc.running)
+      return;
+
+    dependencyCheckKnown = false;
+    dependencyCheckStdout = "";
+    dependencyCheckProc.running = true;
+  }
+
+  function scrcpyDependencyIssueTitle() {
+    const executable = configuredScrcpyExecutable();
+    if (!dependencyCheckKnown || executable === "" || scrcpyDependencyAvailable)
+      return "";
+
+    return embeddedMirrorModeEnabled()
+      ? trSafe("panel.embedded-mirror.scrcpy-missing-title", "scrcpy Missing")
+      : trSafe("panel.scrcpy.missing-title", "scrcpy Missing");
+  }
+
+  function scrcpyDependencyIssueSubtitle() {
+    const executable = configuredScrcpyExecutable();
+    if (!dependencyCheckKnown || executable === "" || scrcpyDependencyAvailable)
+      return "";
+
+    return embeddedMirrorModeEnabled()
+      ? trSafe(
+          "panel.embedded-mirror.scrcpy-missing-description",
+          "The configured scrcpy executable is unavailable: " + executable + ". Install scrcpy or update the embedded command."
+        )
+      : trSafe(
+          "panel.scrcpy.missing-description",
+          "The configured scrcpy executable is unavailable: " + executable + ". Install scrcpy or update the scrcpy command."
+        );
+  }
+
+  function embeddedMirrorPreflightIssueTitle() {
+    const scrcpyIssueTitle = scrcpyDependencyIssueTitle();
+    if (scrcpyIssueTitle !== "")
+      return scrcpyIssueTitle;
+
+    if (dependencyCheckKnown && !adbDependencyAvailable)
+      return trSafe("panel.embedded-mirror.adb-missing-title", "adb Missing");
+
+    if (embeddedMirrorAudioEnabled && embeddedAudioSupportKnown && !embeddedAudioSupported)
+      return trSafe("panel.embedded-mirror.audio-unsupported-title", "Audio Support Unavailable");
+
+    return "";
+  }
+
+  function embeddedMirrorPreflightIssueSubtitle() {
+    const scrcpyIssueSubtitle = scrcpyDependencyIssueSubtitle();
+    if (scrcpyIssueSubtitle !== "")
+      return scrcpyIssueSubtitle;
+
+    if (dependencyCheckKnown && !adbDependencyAvailable)
+      return missingAdbDescription();
+
+    if (embeddedMirrorAudioEnabled && embeddedAudioSupportKnown && !embeddedAudioSupported)
+      return trSafe(
+        "panel.embedded-mirror.audio-unsupported-description",
+        "The configured scrcpy build does not advertise audio support. Upgrade scrcpy or disable embedded audio."
+      );
+
+    return "";
+  }
+
+  function missingQrencodeDescription() {
+    return trSafe(
+      "panel.wireless-adb.qr-missing-command-description",
+      "Install qrencode to generate Wireless ADB pairing QR codes."
+    );
+  }
+
+  function missingAdbDescription() {
+    return trSafe(
+      "panel.embedded-mirror.adb-missing-description",
+      "Install Android platform-tools so the plugin can query display size, send input, and capture fallback snapshots."
+    );
   }
 
   function effectiveBatteryValue(device) {
@@ -844,13 +1166,26 @@ Item {
   }
 
   function persistWirelessAdbSettings() {
-    if (!pluginApi)
+    if (!pluginApi || wirelessAdbProfileLoadInProgress)
       return;
 
-    pluginApi.pluginSettings.wirelessAdbPairHost = (wirelessAdbPairHost || "").trim();
-    pluginApi.pluginSettings.wirelessAdbPairPort = (wirelessAdbPairPort || "").trim();
-    pluginApi.pluginSettings.wirelessAdbConnectHost = (wirelessAdbConnectHost || "").trim();
-    pluginApi.pluginSettings.wirelessAdbConnectPort = (wirelessAdbConnectPort || "").trim();
+    const currentProfile = currentWirelessAdbProfile();
+    const key = wirelessAdbProfileKey(KDEConnect.mainDevice);
+    const nextProfiles = Object.assign({}, wirelessAdbProfiles || ({}));
+    if (key !== "") {
+      if (wirelessAdbProfileHasValue(currentProfile))
+        nextProfiles[key] = currentProfile;
+      else
+        delete nextProfiles[key];
+    }
+
+    wirelessAdbProfiles = nextProfiles;
+    pluginApi.pluginSettings.wirelessAdbProfiles = nextProfiles;
+    pluginApi.pluginSettings.wirelessAdbSessionPreferred = currentProfile.sessionPreferred;
+    pluginApi.pluginSettings.wirelessAdbPairHost = currentProfile.pairHost;
+    pluginApi.pluginSettings.wirelessAdbPairPort = currentProfile.pairPort;
+    pluginApi.pluginSettings.wirelessAdbConnectHost = currentProfile.connectHost;
+    pluginApi.pluginSettings.wirelessAdbConnectPort = currentProfile.connectPort;
     pluginApi.saveSettings();
   }
 
@@ -863,6 +1198,7 @@ Item {
   }
 
   function openWirelessAdbDialog() {
+    loadWirelessAdbProfileForDevice(KDEConnect.mainDevice);
     if ((wirelessAdbConnectHost || "").trim() === "" && (wirelessAdbPairHost || "").trim() !== "")
       wirelessAdbConnectHost = (wirelessAdbPairHost || "").trim();
     if ((wirelessAdbPairHost || "").trim() === "" && (wirelessAdbConnectHost || "").trim() !== "")
@@ -874,6 +1210,13 @@ Item {
   }
 
   function startWirelessAdbPairing() {
+    if (dependencyCheckKnown && !adbDependencyAvailable) {
+      const body = missingAdbDescription();
+      wirelessAdbStatusMessage = body;
+      ToastService.showWarning(trSafe("panel.wireless-adb.error-title", "Wireless ADB"), body, 5000);
+      return;
+    }
+
     const host = (wirelessAdbPairHost || "").trim();
     const port = (wirelessAdbPairPort || "").trim();
     const pairingCode = (wirelessAdbPairingCode || "").trim();
@@ -893,6 +1236,13 @@ Item {
   }
 
   function startWirelessAdbConnect() {
+    if (dependencyCheckKnown && !adbDependencyAvailable) {
+      const body = missingAdbDescription();
+      wirelessAdbStatusMessage = body;
+      ToastService.showWarning(trSafe("panel.wireless-adb.error-title", "Wireless ADB"), body, 5000);
+      return;
+    }
+
     const host = (wirelessAdbConnectHost || "").trim() !== ""
       ? (wirelessAdbConnectHost || "").trim()
       : (wirelessAdbPairHost || "").trim();
@@ -922,6 +1272,20 @@ Item {
 
     if (KDEConnect.wirelessAdbBusy || wirelessAdbQrEncodeProc.running)
       return;
+
+    if (dependencyCheckKnown && !adbDependencyAvailable) {
+      const body = missingAdbDescription();
+      wirelessAdbStatusMessage = body;
+      ToastService.showWarning(trSafe("panel.wireless-adb.error-title", "Wireless ADB"), body, 5000);
+      return;
+    }
+
+    if (dependencyCheckKnown && !qrencodeDependencyAvailable) {
+      const body = missingQrencodeDescription();
+      wirelessAdbStatusMessage = body;
+      ToastService.showWarning(trSafe("panel.wireless-adb.error-title", "Wireless ADB"), body, 5000);
+      return;
+    }
 
     wirelessAdbQrInstanceName = "noctalia-" + randomTokenFromAlphabet(10, "abcdefghijklmnopqrstuvwxyz0123456789");
     wirelessAdbQrSecret = randomTokenFromAlphabet(10, "0123456789");
@@ -964,6 +1328,13 @@ Item {
   }
 
   function startWirelessAdbTcpipHelper() {
+    if (dependencyCheckKnown && !adbDependencyAvailable) {
+      const body = missingAdbDescription();
+      wirelessAdbStatusMessage = body;
+      ToastService.showWarning(trSafe("panel.wireless-adb.error-title", "Wireless ADB"), body, 5000);
+      return;
+    }
+
     wirelessAdbStatusMessage = "";
     persistWirelessAdbSettings();
     KDEConnect.enableWirelessAdb(wirelessAdbCommand);
@@ -1202,6 +1573,12 @@ Item {
       return;
 
     embeddedMirrorAudioEnabled = !embeddedMirrorAudioEnabled;
+
+    if (embeddedMirrorAudioEnabled && embeddedAudioSupportKnown && !embeddedAudioSupported) {
+      const body = embeddedMirrorPreflightIssueSubtitle();
+      if (body !== "")
+        ToastService.showWarning(trSafe("panel.embedded-mirror.audio-unsupported-title", "Audio Support Unavailable"), body, 5000);
+    }
 
     if (!KDEConnect.scrcpyRunning || KDEConnect.scrcpyLaunching)
       return;
@@ -1494,6 +1871,10 @@ Item {
     if ((embeddedScrcpyCommand || "").trim() === "")
       return trSafe("panel.embedded-mirror.not-configured-title", "Embedded Mirror Not Configured");
 
+    const preflightTitle = embeddedMirrorPreflightIssueTitle();
+    if (preflightTitle !== "")
+      return preflightTitle;
+
     if (embeddedMirrorModeEnabled() && (embeddedVideoDevice || "").trim() === "")
       return trSafe("panel.embedded-mirror.feed-not-configured-title", "Video Feed Not Configured");
 
@@ -1545,6 +1926,10 @@ Item {
 
     if ((embeddedScrcpyCommand || "").trim() === "")
       return trSafe("panel.embedded-mirror.not-configured-description", "Set an embedded scrcpy command in the plugin settings.");
+
+    const preflightSubtitle = embeddedMirrorPreflightIssueSubtitle();
+    if (preflightSubtitle !== "")
+      return preflightSubtitle;
 
     if (embeddedMirrorModeEnabled() && (embeddedVideoDevice || "").trim() === "")
       return trSafe("panel.embedded-mirror.feed-not-configured-description", "Set the V4L2 loopback device path in the plugin settings.");
@@ -1680,9 +2065,64 @@ Item {
       }
 
       root.wirelessAdbQrPendingLaunch = false;
-      const body = root.trSafe("panel.wireless-adb.qr-generate-error-description", "Failed to generate the Wireless ADB QR code.");
+      const body = !root.qrencodeDependencyAvailable
+        ? root.missingQrencodeDescription()
+        : root.trSafe("panel.wireless-adb.qr-generate-error-description", "Failed to generate the Wireless ADB QR code.");
       root.wirelessAdbStatusMessage = body;
       ToastService.showWarning(root.trSafe("panel.wireless-adb.error-title", "Wireless ADB"), body, 5000);
+    }
+  }
+
+  Process {
+    id: dependencyCheckProc
+    running: false
+    command: [
+      "sh",
+      "-lc",
+      "scrcpy_exec=\"$1\"\n"
+        + "audio_exec=\"$2\"\n"
+        + "if [ -n \"$scrcpy_exec\" ]; then\n"
+        + "  if command -v \"$scrcpy_exec\" >/dev/null 2>&1; then echo 'scrcpy=1'; else echo 'scrcpy=0'; fi\n"
+        + "else\n"
+        + "  echo 'scrcpy='\n"
+        + "fi\n"
+        + "if command -v adb >/dev/null 2>&1; then echo 'adb=1'; else echo 'adb=0'; fi\n"
+        + "if command -v qrencode >/dev/null 2>&1; then echo 'qrencode=1'; else echo 'qrencode=0'; fi\n"
+        + "if [ -n \"$audio_exec\" ] && command -v \"$audio_exec\" >/dev/null 2>&1; then\n"
+        + "  help_output=$(\"$audio_exec\" --help 2>&1 || true)\n"
+        + "  if printf '%s\\n' \"$help_output\" | grep -q -- '--no-audio'; then echo 'audio=1'; else echo 'audio=0'; fi\n"
+        + "else\n"
+        + "  echo 'audio='\n"
+        + "fi",
+      "--",
+      root.configuredScrcpyExecutable(),
+      root.embeddedAudioScrcpyExecutable()
+    ]
+
+    stdout: StdioCollector {
+      onStreamFinished: {
+        root.dependencyCheckStdout = text.trim();
+      }
+    }
+
+    onExited: (exitCode, exitStatus) => {
+      const values = ({});
+      const lines = String(root.dependencyCheckStdout || "").split(/\n+/);
+      for (let index = 0; index < lines.length; ++index) {
+        const line = String(lines[index] || "").trim();
+        if (line === "" || line.indexOf("=") === -1)
+          continue;
+
+        const splitIndex = line.indexOf("=");
+        values[line.slice(0, splitIndex)] = line.slice(splitIndex + 1);
+      }
+
+      root.scrcpyDependencyAvailable = root.parseDependencyCheckValue(values, "scrcpy", true);
+      root.adbDependencyAvailable = root.parseDependencyCheckValue(values, "adb", true);
+      root.qrencodeDependencyAvailable = root.parseDependencyCheckValue(values, "qrencode", true);
+      root.embeddedAudioSupportKnown = String(values.audio ?? "").trim() !== "";
+      root.embeddedAudioSupported = root.parseDependencyCheckValue(values, "audio", true);
+      root.dependencyCheckKnown = exitCode === 0;
     }
   }
 
@@ -2144,7 +2584,10 @@ Item {
                             visible: root.embeddedMirrorModeEnabled()
                             icon: root.embeddedMirrorAudioEnabled ? "volume" : "volume-off"
                             tooltipText: root.embeddedMirrorAudioEnabled
-                              ? root.trSafe("panel.embedded-mirror.audio-disable", "Disable embedded audio")
+                              ? (root.trSafe("panel.embedded-mirror.audio-disable", "Disable embedded audio")
+                                  + (root.embeddedAudioSupportKnown && !root.embeddedAudioSupported
+                                      ? "\n" + root.trSafe("panel.embedded-mirror.audio-unsupported-tooltip", "Current scrcpy build does not advertise audio support.")
+                                      : ""))
                               : root.trSafe("panel.embedded-mirror.audio-enable", "Enable embedded audio")
                             baseSize: Style.baseWidgetSize * 0.8
                             colorBg: "#211814"
