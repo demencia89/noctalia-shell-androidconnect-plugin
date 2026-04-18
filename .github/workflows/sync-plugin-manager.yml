@@ -24,13 +24,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Verify sync token
-        if: ${{ secrets.NOCTALIA_PLUGINS_SYNC_TOKEN == '' }}
-        shell: bash
-        run: |
-          echo "Missing repository secret: NOCTALIA_PLUGINS_SYNC_TOKEN"
-          exit 1
-
       - name: Validate release version
         shell: bash
         run: |
