@@ -100,6 +100,11 @@ Item {
     ?? defaults.embeddedMirrorForceSnapshotFallback
     ?? false
   )
+  property bool embeddedMirrorAudioEnabled: Boolean(
+    cfg.embeddedMirrorAudioEnabled
+    ?? defaults.embeddedMirrorAudioEnabled
+    ?? false
+  )
   property bool embeddedMirrorPendingSessionRecovery: false
   property var embeddedMirrorRecoveryPreview: null
   property string embeddedMirrorRecoveryReason: ""
@@ -518,6 +523,7 @@ Item {
   onEmbeddedMirrorEnabledChanged: root.syncBackgroundRefreshPolicy()
   onPhoneClickActionChanged: root.syncBackgroundRefreshPolicy()
   onEmbeddedMirrorForceSnapshotFallbackChanged: root.persistEmbeddedMirrorSnapshotFallbackMode()
+  onEmbeddedMirrorAudioEnabledChanged: root.persistEmbeddedMirrorAudioMode()
 
   function handlePhoneClick(preview) {
     if (KDEConnect.mainDevice === null)
@@ -628,6 +634,14 @@ Item {
       return;
 
     pluginApi.pluginSettings.embeddedMirrorForceSnapshotFallback = embeddedMirrorForceSnapshotFallback;
+    pluginApi.saveSettings();
+  }
+
+  function persistEmbeddedMirrorAudioMode() {
+    if (!pluginApi)
+      return;
+
+    pluginApi.pluginSettings.embeddedMirrorAudioEnabled = embeddedMirrorAudioEnabled;
     pluginApi.saveSettings();
   }
 
@@ -1183,6 +1197,22 @@ Item {
       ensureEmbeddedMirrorSession(previewItem);
   }
 
+  function toggleEmbeddedMirrorAudioMode(preview) {
+    if (!embeddedMirrorModeEnabled())
+      return;
+
+    embeddedMirrorAudioEnabled = !embeddedMirrorAudioEnabled;
+
+    if (!KDEConnect.scrcpyRunning || KDEConnect.scrcpyLaunching)
+      return;
+
+    const previewItem = preview || root.activePhonePreview || null;
+    requestEmbeddedMirrorSessionRecovery(
+      previewItem,
+      embeddedMirrorAudioEnabled ? "audio-enable" : "audio-disable"
+    );
+  }
+
   function ensureEmbeddedMirrorSession(preview) {
     if (!embeddedMirrorModeEnabled() || KDEConnect.mainDevice === null)
       return;
@@ -1211,6 +1241,10 @@ Item {
         embeddedVideoEncoder,
         embeddedVideoCodecOptions,
         mirrorDebugOverlayEnabled
+      );
+      tunedEmbeddedCommand = KDEConnect.applyConfiguredMirrorAudioMode(
+        tunedEmbeddedCommand,
+        embeddedMirrorAudioEnabled
       );
       const launchCommand = feedModeEnabled
         ? KDEConnect.buildScrcpyFeedCommand(
@@ -2104,6 +2138,23 @@ Item {
                             colorBorder: "#6c4c3e"
                             colorBorderHover: "#f4ae89"
                             onClicked: root.cyclePhoneSizePreset()
+                          }
+
+                          NIconButton {
+                            visible: root.embeddedMirrorModeEnabled()
+                            icon: root.embeddedMirrorAudioEnabled ? "volume" : "volume-off"
+                            tooltipText: root.embeddedMirrorAudioEnabled
+                              ? root.trSafe("panel.embedded-mirror.audio-disable", "Disable embedded audio")
+                              : root.trSafe("panel.embedded-mirror.audio-enable", "Enable embedded audio")
+                            baseSize: Style.baseWidgetSize * 0.8
+                            colorBg: "#211814"
+                            colorFg: "#f4ae89"
+                            colorBgHover: "#3a261f"
+                            colorFgHover: "#fff4ed"
+                            colorBorder: "#6c4c3e"
+                            colorBorderHover: "#f4ae89"
+                            enabled: !root.embeddedMirrorPendingSessionRecovery
+                            onClicked: root.toggleEmbeddedMirrorAudioMode()
                           }
 
                           NIconButton {

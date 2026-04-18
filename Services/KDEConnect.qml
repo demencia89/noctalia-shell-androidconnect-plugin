@@ -327,6 +327,20 @@ QtObject {
     return command;
   }
 
+  function applyConfiguredMirrorAudioMode(commandString: string, audioEnabled: bool): string {
+    let command = normalizeShellCommand(commandString);
+    if (command === "")
+      return "";
+
+    command = command.replace(/(^|\s)--no-audio\b/g, " ");
+    command = normalizeShellCommand(command);
+
+    if (!audioEnabled)
+      command = appendScrcpyOption(command, /(^|\s)--no-audio\b/, "--no-audio");
+
+    return command;
+  }
+
   function buildScrcpyOverlayCommand(commandString: string, windowTitle: string, x: real, y: real, width: real, height: real, deviceSerial: string): string {
     let command = normalizeShellCommand(commandString);
     const trimmedSerial = String(deviceSerial || "").trim();
