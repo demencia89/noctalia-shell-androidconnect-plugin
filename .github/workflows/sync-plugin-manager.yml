@@ -1,0 +1,97 @@
+name: Sync Plugin Manager
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TARGET_REPOSITORY: demencia89/noctalia-plugins
+  TARGET_BRANCH: add-androidconnect-plugin
+  TARGET_PATH: androidconnect
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify sync token
+        if: ${{ secrets.NOCTALIA_PLUGINS_SYNC_TOKEN == '' }}
+        shell: bash
+        run: |
+          echo "Missing repository secret: NOCTALIA_PLUGINS_SYNC_TOKEN"
+          exit 1
+
+      - name: Validate release version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="$(jq -r '.version' manifest.json)"
+          if [[ -z "$version" || "$version" == "null" ]]; then
+            echo "manifest.json is missing a version"
+            exit 1
+          fi
+
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            tag_name="${{ github.event.release.tag_name }}"
+            expected_tag="v${version}"
+            if [[ "$tag_name" != "$expected_tag" ]]; then
+              echo "Release tag ${tag_name} does not match manifest version ${expected_tag}"
+              exit 1
+            fi
+          fi
+
+      - name: Checkout plugin-manager branch
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.TARGET_REPOSITORY }}
+          ref: ${{ env.TARGET_BRANCH }}
+          path: plugin-manager
+          token: ${{ secrets.NOCTALIA_PLUGINS_SYNC_TOKEN }}
+          fetch-depth: 0
+
+      - name: Sync AndroidConnect into plugin-manager tree
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p "plugin-manager/${TARGET_PATH}"
+
+          rsync -a --delete \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude '.gitignore' \
+            --exclude '.codex' \
+            --exclude 'settings.json' \
+            ./ "plugin-manager/${TARGET_PATH}/"
+
+      - name: Commit and push sync
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd plugin-manager
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          status_output="$(git status --short -- "${TARGET_PATH}")"
+          if [[ -z "$status_output" ]]; then
+            echo "No plugin-manager changes to publish."
+            exit 0
+          fi
+
+          printf '%s\n' "$status_output"
+          version="$(jq -r '.version' "${TARGET_PATH}/manifest.json")"
+          git add "${TARGET_PATH}"
+          git commit -m "Sync AndroidConnect v${version}"
+          git push origin "HEAD:${TARGET_BRANCH}"
