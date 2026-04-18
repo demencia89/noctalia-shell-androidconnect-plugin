@@ -22,6 +22,7 @@ jobs:
       - name: Checkout source repository
         uses: actions/checkout@v4
         with:
+          path: source
           fetch-depth: 0
 
       - name: Validate release version
@@ -29,7 +30,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          version="$(jq -r '.version' manifest.json)"
+          version="$(jq -r '.version' source/manifest.json)"
           if [[ -z "$version" || "$version" == "null" ]]; then
             echo "manifest.json is missing a version"
             exit 1
@@ -66,7 +67,7 @@ jobs:
             --exclude '.gitignore' \
             --exclude '.codex' \
             --exclude 'settings.json' \
-            ./ "plugin-manager/${TARGET_PATH}/"
+            source/ "plugin-manager/${TARGET_PATH}/"
 
       - name: Commit and push sync
         shell: bash
