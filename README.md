@@ -2,6 +2,8 @@
 
 `AndroidConnect` is a Noctalia plugin for Android device status, quick actions, file transfer, and embedded `scrcpy` control inside the panel.
 
+Current release: `v1.0.0`
+
 This project is built on top of the original Noctalia `kde-connect` plugin. Credit and thanks to the original Noctalia KDE Connect plugin developers for the base plugin and architecture this work extends.
 
 Upstream base project:
@@ -30,6 +32,8 @@ Project repository:
 
 ## Current Status
 
+`AndroidConnect v1.0.0` is the first public release of this renamed and extended plugin package.
+
 The plugin is currently shaped for real user installs, not just local experimentation.
 
 Known-good behavior currently preserved:
@@ -46,6 +50,7 @@ Recent release-polish changes:
 - Made mirror snapshot and Wireless ADB QR temp files instance-scoped in `/tmp`.
 - Made ADB snapshot writes atomic to avoid stale or partially-written preview frames.
 - Kept the supported fallback path as snapshot mode only. Overlay fallback was not reintroduced.
+- Tagged this release as `v1.0.0`.
 
 ## Features
 
