@@ -22,6 +22,8 @@ Rectangle {
   property bool mirrorFeedRestarting: false
   property bool mediaDevicesReloadPending: false
   property bool mirrorFeedAttachDelayActive: false
+  property double mirrorFeedLastFrameAtMs: 0
+  property bool mirrorFeedFrameLive: false
 
   readonly property real deviceArtWidth: 597
   readonly property real deviceArtHeight: 1241
@@ -132,31 +134,123 @@ Rectangle {
   readonly property var preferredCameraFormat: {
     const device = selectedVideoInput;
     const formats = device && device.videoFormats ? device.videoFormats : [];
+    let preferredFormat = undefined;
 
     for (let i = 0; i < formats.length; ++i) {
-      const format = formats[i];
-      const resolution = format && format.resolution ? format.resolution : null;
-      if (!resolution)
+      const candidate = formats[i];
+      if (candidate === undefined || candidate === null)
         continue;
 
-      const width = Number(resolution.width);
-      const height = Number(resolution.height);
-      if (width === 576 && height === 1280)
-        return format;
+      if (phoneRoot.isBetterCameraFormat(candidate, preferredFormat))
+        preferredFormat = candidate;
     }
 
-    return formats.length > 0 ? formats[0] : undefined;
+    return preferredFormat !== undefined ? preferredFormat : (formats.length > 0 ? formats[0] : undefined);
   }
   readonly property bool shouldActivateMirrorCamera: mirrorFeedEnabled
     && mirrorFeedAvailable
     && !mirrorFeedRestarting
     && !mirrorFeedAttachDelayActive
-  readonly property bool mirrorDisplayVisible: shouldActivateMirrorCamera && mirrorFeedError === ""
+  readonly property bool mirrorDisplayVisible: shouldActivateMirrorCamera
+    && mirrorFeedError === ""
+    && mirrorFeedFrameLive
   radius: 0
   color: "transparent"
   border.width: 0
   border.color: "transparent"
   clip: false
+
+  function formatResolutionWidth(format) {
+    const resolution = format && format.resolution ? format.resolution : null;
+    return resolution ? Number(resolution.width || 0) : 0;
+  }
+
+  function formatResolutionHeight(format) {
+    const resolution = format && format.resolution ? format.resolution : null;
+    return resolution ? Number(resolution.height || 0) : 0;
+  }
+
+  function formatArea(format) {
+    return formatResolutionWidth(format) * formatResolutionHeight(format);
+  }
+
+  function hasMirrorContentSize() {
+    return mirrorContentWidth > 0 && mirrorContentHeight > 0;
+  }
+
+  function formatAspectError(format) {
+    const width = formatResolutionWidth(format);
+    const height = formatResolutionHeight(format);
+    if (width <= 0 || height <= 0)
+      return Number.MAX_VALUE;
+
+    if (!hasMirrorContentSize())
+      return 0;
+
+    const expectedAspect = Number(mirrorContentWidth) / Math.max(1, Number(mirrorContentHeight));
+    const directError = Math.abs((width / height) - expectedAspect);
+    const rotatedError = Math.abs((height / width) - expectedAspect);
+    return Math.min(directError, rotatedError);
+  }
+
+  function formatMatchesPreferredOrientation(format) {
+    const width = formatResolutionWidth(format);
+    const height = formatResolutionHeight(format);
+    if (width <= 0 || height <= 0)
+      return false;
+
+    if (!hasMirrorContentSize())
+      return height >= width;
+
+    return (width >= height) === (mirrorContentWidth >= mirrorContentHeight);
+  }
+
+  function formatIsLegacyPreferred(format) {
+    const width = formatResolutionWidth(format);
+    const height = formatResolutionHeight(format);
+    return (width === 576 && height === 1280) || (width === 1280 && height === 576);
+  }
+
+  function isBetterCameraFormat(candidate, currentBest) {
+    if (!candidate)
+      return false;
+
+    if (!currentBest)
+      return true;
+
+    const candidateAspectError = formatAspectError(candidate);
+    const bestAspectError = formatAspectError(currentBest);
+    if (Math.abs(candidateAspectError - bestAspectError) > 0.0001)
+      return candidateAspectError < bestAspectError;
+
+    const candidateOrientationMatch = formatMatchesPreferredOrientation(candidate);
+    const bestOrientationMatch = formatMatchesPreferredOrientation(currentBest);
+    if (candidateOrientationMatch !== bestOrientationMatch)
+      return candidateOrientationMatch;
+
+    const candidateLegacyPreferred = formatIsLegacyPreferred(candidate);
+    const bestLegacyPreferred = formatIsLegacyPreferred(currentBest);
+    if (candidateLegacyPreferred !== bestLegacyPreferred)
+      return candidateLegacyPreferred;
+
+    return formatArea(candidate) > formatArea(currentBest);
+  }
+
+  function requestMirrorFeedReattach() {
+    if (!mirrorFeedEnabled)
+      return;
+
+    mirrorFeedError = "";
+    mirrorFeedLastFrameAtMs = 0;
+    mirrorFeedFrameLive = false;
+    mirrorFeedAttachDelayActive = true;
+    mirrorFeedAttachDelayTimer.restart();
+  }
+
+  function noteMirrorFrameDelivered() {
+    mirrorFeedLastFrameAtMs = Date.now();
+    mirrorFeedFrameLive = true;
+  }
 
   function reloadMediaDevices() {
     if (mediaDevicesReloadPending)
@@ -194,10 +288,26 @@ Rectangle {
 
   Timer {
     id: mirrorFeedAttachDelayTimer
-    interval: 1400
+    interval: 1800
     repeat: false
     onTriggered: {
       phoneRoot.mirrorFeedAttachDelayActive = false;
+    }
+  }
+
+  Timer {
+    id: mirrorFeedFrameWatchdog
+    interval: 450
+    repeat: true
+    running: phoneRoot.mirrorFeedEnabled
+    onTriggered: {
+      if (!phoneRoot.shouldActivateMirrorCamera) {
+        phoneRoot.mirrorFeedFrameLive = false;
+        return;
+      }
+
+      const lastFrameAt = Number(phoneRoot.mirrorFeedLastFrameAtMs || 0);
+      phoneRoot.mirrorFeedFrameLive = lastFrameAt > 0 && (Date.now() - lastFrameAt) <= 1200;
     }
   }
 
@@ -214,15 +324,23 @@ Rectangle {
     cameraFormat: phoneRoot.preferredCameraFormat
 
     onActiveChanged: {
-      if (active)
+      if (active) {
         phoneRoot.mirrorFeedError = "";
+        phoneRoot.mirrorFeedLastFrameAtMs = 0;
+        phoneRoot.mirrorFeedFrameLive = false;
+      } else {
+        phoneRoot.mirrorFeedFrameLive = false;
+      }
     }
 
     onCameraDeviceChanged: {
       phoneRoot.mirrorFeedError = "";
+      phoneRoot.mirrorFeedLastFrameAtMs = 0;
+      phoneRoot.mirrorFeedFrameLive = false;
     }
 
     onErrorOccurred: (error, errorString) => {
+      phoneRoot.mirrorFeedFrameLive = false;
       phoneRoot.mirrorFeedError = errorString !== "" ? errorString : ("camera error " + error);
     }
   }
@@ -231,6 +349,8 @@ Rectangle {
     mirrorFeedError = "";
     mirrorFeedRestarting = false;
     mediaDevicesReloadPending = false;
+    mirrorFeedLastFrameAtMs = 0;
+    mirrorFeedFrameLive = false;
     mirrorFeedAttachDelayActive = mirrorFeedEnabled;
     if (mirrorFeedEnabled)
       mirrorFeedAttachDelayTimer.restart();
@@ -239,10 +359,29 @@ Rectangle {
   }
 
   onMirrorFeedAvailableChanged: {
-    if (mirrorFeedAvailable)
+    if (mirrorFeedAvailable) {
       mirrorFeedError = "";
-    else
+      mirrorFeedLastFrameAtMs = 0;
+      mirrorFeedFrameLive = false;
+    } else {
       mirrorFeedRestarting = false;
+      mirrorFeedFrameLive = false;
+    }
+  }
+
+  onPreferredCameraFormatChanged: {
+    if (mirrorFeedAvailable)
+      requestMirrorFeedReattach();
+  }
+
+  onMirrorContentWidthChanged: {
+    if (mirrorContentWidth > 0 && mirrorContentHeight > 0)
+      requestMirrorFeedReattach();
+  }
+
+  onMirrorContentHeightChanged: {
+    if (mirrorContentWidth > 0 && mirrorContentHeight > 0)
+      requestMirrorFeedReattach();
   }
 
   RectangularShadow {
@@ -334,6 +473,15 @@ Rectangle {
           anchors.fill: parent
           visible: phoneRoot.mirrorDisplayVisible
           fillMode: VideoOutput.Stretch
+        }
+
+        Connections {
+          target: mirrorVideoOutput.videoSink
+          enabled: target !== null && target !== undefined
+
+          function onVideoFrameChanged(frame) {
+            phoneRoot.noteMirrorFrameDelivered();
+          }
         }
 
         MouseArea {

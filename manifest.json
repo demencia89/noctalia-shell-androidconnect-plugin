@@ -28,6 +28,8 @@
     "defaultSettings": {
       "hideIfNoDeviceConnected": false,
       "iconColor": "none",
+      "panelPosition": "top_right",
+      "panelFloating": false,
       "embeddedMirrorAudioEnabled": false,
       "phoneSizePresetIndex": 0,
       "phoneSizePresetKey": "small",

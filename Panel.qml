@@ -19,8 +19,45 @@ Item {
 
   // SmartPanel
   readonly property var geometryPlaceholder: panelContainer
-  readonly property bool panelAnchorTop: true
-  readonly property bool panelAnchorRight: true
+  readonly property string panelPosition: {
+    const rawPosition = String(cfg.panelPosition ?? defaults.panelPosition ?? "top_right").trim().toLowerCase();
+
+    switch (rawPosition) {
+    case "top_left":
+    case "top_center":
+    case "top_right":
+    case "center_left":
+    case "center":
+    case "center_right":
+    case "bottom_left":
+    case "bottom_center":
+    case "bottom_right":
+      return rawPosition;
+    case "top":
+      return "top_center";
+    case "left":
+      return "center_left";
+    case "right":
+      return "center_right";
+    case "bottom":
+      return "bottom_center";
+    default:
+      return "top_right";
+    }
+  }
+  readonly property bool panelFloating: Boolean(
+    cfg.panelFloating
+    ?? defaults.panelFloating
+    ?? false
+  )
+  readonly property bool panelAnchorHorizontalCenter: panelPosition === "center"
+    || panelPosition.endsWith("_center")
+  readonly property bool panelAnchorVerticalCenter: panelPosition === "center"
+    || panelPosition.startsWith("center_")
+  readonly property bool panelAnchorTop: panelPosition.startsWith("top_")
+  readonly property bool panelAnchorBottom: panelPosition.startsWith("bottom_")
+  readonly property bool panelAnchorLeft: panelPosition.endsWith("_left")
+  readonly property bool panelAnchorRight: panelPosition.endsWith("_right")
 
   property real contentPreferredWidth: {
     if (phoneSizePresetIndex === 0)
@@ -31,8 +68,22 @@ Item {
   }
   property real contentPreferredHeight: deviceData.implicitHeight + (Style.marginM * 2)
 
-  readonly property bool allowAttach: true
+  readonly property bool allowAttach: !panelFloating
   readonly property color panelBackgroundColor: Color.mSurface
+  readonly property color panelCardColor: Color.mSurface
+  readonly property color panelCardElevatedColor: Color.mSurfaceVariant
+  readonly property color panelCardOutlineColor: Color.mOutline
+  readonly property color panelPrimaryTextColor: Color.mOnSurface
+  readonly property color panelSecondaryTextColor: Color.mOnSurfaceVariant
+  readonly property color panelAccentColor: Color.mPrimary
+  readonly property color panelActionButtonBgColor: Color.mSurfaceVariant
+  readonly property color panelActionButtonFgColor: Color.mPrimary
+  readonly property color panelActionButtonBgHoverColor: Color.mHover
+  readonly property color panelActionButtonFgHoverColor: Color.mOnHover
+  readonly property color panelActionButtonBorderColor: Color.mOutline
+  readonly property color panelActionButtonBorderHoverColor: Color.mPrimary
+  readonly property color panelAccentBadgeColor: Qt.alpha(Color.mPrimary, 0.16)
+  readonly property color panelAccentBadgeBorderColor: Qt.alpha(Color.mPrimary, 0.55)
   readonly property bool blurEnabled: true
   readonly property string embeddedMirrorCommand: "scrcpy --no-audio --capture-orientation=@0"
   readonly property bool reduceBackgroundRefreshWhileMirroring: true
@@ -1958,15 +2009,15 @@ Item {
                           Layout.preferredWidth: 34 * Style.uiScaleRatio
                           Layout.preferredHeight: 34 * Style.uiScaleRatio
                           radius: 17 * Style.uiScaleRatio
-                          color: "#211814"
+                          color: root.panelActionButtonBgColor
                           border.width: Style.borderS
-                          border.color: "#6c4c3e"
+                          border.color: root.panelActionButtonBorderColor
 
                           NIcon {
                             anchors.centerIn: parent
                             icon: "device-mobile"
                             pointSize: Style.fontSizeS
-                            color: "#f4ae89"
+                            color: root.panelActionButtonFgColor
                           }
                         }
 
@@ -1974,7 +2025,7 @@ Item {
                           text: KDEConnect.mainDevice.name
                           pointSize: Style.fontSizeL * 1.55
                           font.weight: Style.fontWeightBold
-                          color: "#fff5ef"
+                          color: root.panelPrimaryTextColor
                           Layout.fillWidth: true
                           elide: Text.ElideRight
                         }
@@ -1988,12 +2039,12 @@ Item {
                             icon: "swipe"
                             tooltipText: multipleDevices ? pluginApi?.tr("panel.other-devices") : ""
                             baseSize: Style.baseWidgetSize * 0.8
-                            colorBg: "#211814"
-                            colorFg: "#f4ae89"
-                            colorBgHover: "#3a261f"
-                            colorFgHover: "#fff4ed"
-                            colorBorder: "#6c4c3e"
-                            colorBorderHover: "#f4ae89"
+                            colorBg: root.panelActionButtonBgColor
+                            colorFg: root.panelActionButtonFgColor
+                            colorBgHover: root.panelActionButtonBgHoverColor
+                            colorFgHover: root.panelActionButtonFgHoverColor
+                            colorBorder: root.panelActionButtonBorderColor
+                            colorBorderHover: root.panelActionButtonBorderHoverColor
                             onClicked: {
                               deviceSwitcherOpen = !deviceSwitcherOpen
                             }
@@ -2006,12 +2057,12 @@ Item {
                             tooltipText: root.trSafe("panel.phone-size.tooltip", "Phone size: ")
                               + root.phoneSizeLabel + " (" + root.phoneSizePercent + "%)"
                             baseSize: Style.baseWidgetSize * 0.8
-                            colorBg: "#211814"
-                            colorFg: "#f4ae89"
-                            colorBgHover: "#3a261f"
-                            colorFgHover: "#fff4ed"
-                            colorBorder: "#6c4c3e"
-                            colorBorderHover: "#f4ae89"
+                            colorBg: root.panelActionButtonBgColor
+                            colorFg: root.panelActionButtonFgColor
+                            colorBgHover: root.panelActionButtonBgHoverColor
+                            colorFgHover: root.panelActionButtonFgHoverColor
+                            colorBorder: root.panelActionButtonBorderColor
+                            colorBorderHover: root.panelActionButtonBorderHoverColor
                             onClicked: root.cyclePhoneSizePreset()
                           }
 
@@ -2022,12 +2073,12 @@ Item {
                               ? root.trSafe("panel.embedded-mirror.audio-disable", "Disable embedded audio")
                               : root.trSafe("panel.embedded-mirror.audio-enable", "Enable embedded audio")
                             baseSize: Style.baseWidgetSize * 0.8
-                            colorBg: "#211814"
-                            colorFg: "#f4ae89"
-                            colorBgHover: "#3a261f"
-                            colorFgHover: "#fff4ed"
-                            colorBorder: "#6c4c3e"
-                            colorBorderHover: "#f4ae89"
+                            colorBg: root.panelActionButtonBgColor
+                            colorFg: root.panelActionButtonFgColor
+                            colorBgHover: root.panelActionButtonBgHoverColor
+                            colorFgHover: root.panelActionButtonFgHoverColor
+                            colorBorder: root.panelActionButtonBorderColor
+                            colorBorderHover: root.panelActionButtonBorderHoverColor
                             enabled: !root.embeddedMirrorPendingSessionRecovery
                             onClicked: root.toggleEmbeddedMirrorAudioMode()
                           }
@@ -2038,12 +2089,12 @@ Item {
                               ? root.trSafe("panel.wireless-adb.busy-tooltip", "Wireless ADB command is running")
                               : root.trSafe("panel.wireless-adb.tooltip", "Open Wireless ADB tools")
                             baseSize: Style.baseWidgetSize * 0.8
-                            colorBg: "#211814"
-                            colorFg: "#f4ae89"
-                            colorBgHover: "#3a261f"
-                            colorFgHover: "#fff4ed"
-                            colorBorder: "#6c4c3e"
-                            colorBorderHover: "#f4ae89"
+                            colorBg: root.panelActionButtonBgColor
+                            colorFg: root.panelActionButtonFgColor
+                            colorBgHover: root.panelActionButtonBgHoverColor
+                            colorFgHover: root.panelActionButtonFgHoverColor
+                            colorBorder: root.panelActionButtonBorderColor
+                            colorBorderHover: root.panelActionButtonBorderHoverColor
                             onClicked: root.openWirelessAdbDialog()
                           }
 
@@ -2051,12 +2102,12 @@ Item {
                             icon: "device-mobile-search"
                             tooltipText: pluginApi?.tr("panel.browse-device")
                             baseSize: Style.baseWidgetSize * 0.8
-                            colorBg: "#211814"
-                            colorFg: "#f4ae89"
-                            colorBgHover: "#3a261f"
-                            colorFgHover: "#fff4ed"
-                            colorBorder: "#6c4c3e"
-                            colorBorderHover: "#f4ae89"
+                            colorBg: root.panelActionButtonBgColor
+                            colorFg: root.panelActionButtonFgColor
+                            colorBgHover: root.panelActionButtonBgHoverColor
+                            colorFgHover: root.panelActionButtonFgHoverColor
+                            colorBorder: root.panelActionButtonBorderColor
+                            colorBorderHover: root.panelActionButtonBorderHoverColor
                             onClicked: KDEConnect.browseFiles(KDEConnect.mainDevice.id)
                           }
 
@@ -2064,12 +2115,12 @@ Item {
                             icon: "device-mobile-share"
                             tooltipText: pluginApi?.tr("panel.send-file")
                             baseSize: Style.baseWidgetSize * 0.8
-                            colorBg: "#211814"
-                            colorFg: "#f4ae89"
-                            colorBgHover: "#3a261f"
-                            colorFgHover: "#fff4ed"
-                            colorBorder: "#6c4c3e"
-                            colorBorderHover: "#f4ae89"
+                            colorBg: root.panelActionButtonBgColor
+                            colorFg: root.panelActionButtonFgColor
+                            colorBgHover: root.panelActionButtonBgHoverColor
+                            colorFgHover: root.panelActionButtonFgHoverColor
+                            colorBorder: root.panelActionButtonBorderColor
+                            colorBorderHover: root.panelActionButtonBorderHoverColor
                             onClicked: shareFilePicker.open()
                           }
 
@@ -2077,12 +2128,12 @@ Item {
                             icon: "radar"
                             tooltipText: pluginApi?.tr("panel.find-device")
                             baseSize: Style.baseWidgetSize * 0.8
-                            colorBg: "#211814"
-                            colorFg: "#f4ae89"
-                            colorBgHover: "#3a261f"
-                            colorFgHover: "#fff4ed"
-                            colorBorder: "#6c4c3e"
-                            colorBorderHover: "#f4ae89"
+                            colorBg: root.panelActionButtonBgColor
+                            colorFg: root.panelActionButtonFgColor
+                            colorBgHover: root.panelActionButtonBgHoverColor
+                            colorFgHover: root.panelActionButtonFgHoverColor
+                            colorBorder: root.panelActionButtonBorderColor
+                            colorBorderHover: root.panelActionButtonBorderHoverColor
                             onClicked: KDEConnect.triggerFindMyPhone(KDEConnect.mainDevice.id)
                           }
                         }
@@ -2225,7 +2276,7 @@ Item {
                           NIcon {
                             icon: deviceData.getBatteryIcon(root.effectiveBatteryValue(KDEConnect.mainDevice), root.effectiveChargingValue(KDEConnect.mainDevice))
                             pointSize: Style.fontSizeXL * 1.2075
-                            color: "#f4e3b6"
+                            color: root.panelAccentColor
                             Layout.alignment: Qt.AlignTop
                             Layout.preferredWidth: 38 * Style.uiScaleRatio
                           }
@@ -2237,7 +2288,7 @@ Item {
                             NText {
                               text: pluginApi?.tr("panel.card.battery") || "Battery"
                               pointSize: Style.fontSizeS * 1.15
-                              color: "#c9b79b"
+                              color: root.panelSecondaryTextColor
                             }
 
                             NText {
@@ -2246,7 +2297,7 @@ Item {
                                 : (root.effectiveBatteryValue(KDEConnect.mainDevice) + "%")
                               pointSize: Style.fontSizeL * 1.288
                               font.weight: Style.fontWeightBold
-                              color: "#fff5ef"
+                              color: root.panelPrimaryTextColor
                             }
                           }
                         }
@@ -2258,7 +2309,7 @@ Item {
                           NIcon {
                             icon: deviceData.getCellularTypeIcon(root.effectiveNetworkType(KDEConnect.mainDevice))
                             pointSize: Style.fontSizeXL * 1.2075
-                            color: "#f4e3b6"
+                            color: root.panelAccentColor
                             Layout.alignment: Qt.AlignTop
                             Layout.preferredWidth: 38 * Style.uiScaleRatio
                           }
@@ -2270,14 +2321,14 @@ Item {
                             NText {
                               text: pluginApi?.tr("panel.card.network") || "Network"
                               pointSize: Style.fontSizeS * 1.15
-                              color: "#c9b79b"
+                              color: root.panelSecondaryTextColor
                             }
 
                             NText {
                               text: root.effectiveNetworkType(KDEConnect.mainDevice) || (pluginApi?.tr("panel.unknown") || "Unknown")
                               pointSize: Style.fontSizeL * 1.288
                               font.weight: Style.fontWeightBold
-                              color: "#fff5ef"
+                              color: root.panelPrimaryTextColor
                             }
                           }
                         }
@@ -2289,7 +2340,7 @@ Item {
                           NIcon {
                             icon: deviceData.getCellularStrengthIcon(root.effectiveSignalStrength(KDEConnect.mainDevice))
                             pointSize: Style.fontSizeXL * 1.2075
-                            color: "#f4e3b6"
+                            color: root.panelAccentColor
                             Layout.alignment: Qt.AlignTop
                             Layout.preferredWidth: 38 * Style.uiScaleRatio
                           }
@@ -2301,7 +2352,7 @@ Item {
                             NText {
                               text: root.trSafe("panel.card.signal", "Signal")
                               pointSize: Style.fontSizeS * 1.15
-                              color: "#c9b79b"
+                              color: root.panelSecondaryTextColor
                             }
 
                             NText {
@@ -2309,7 +2360,7 @@ Item {
                                 || (pluginApi?.tr("panel.unknown") || "Unknown")
                               pointSize: Style.fontSizeL * 1.288
                               font.weight: Style.fontWeightBold
-                              color: "#fff5ef"
+                              color: root.panelPrimaryTextColor
                             }
                           }
                         }
@@ -2338,9 +2389,9 @@ Item {
                           (root.phoneSizePresetIndex === 0 ? 104 : (root.phoneSizePresetIndex === 1 ? 118 : 132)) * Style.uiScaleRatio
                         )
                         radius: 18 * Style.uiScaleRatio
-                        color: "#211814"
+                        color: root.panelCardElevatedColor
                         border.width: Style.borderS
-                        border.color: "#6c4c3e"
+                        border.color: root.panelCardOutlineColor
                         clip: true
 
                         ColumnLayout {
@@ -2354,7 +2405,7 @@ Item {
                             text: root.embeddedMirrorDrawerStatusTitle(phonePreview)
                             pointSize: Style.fontSizeS * (root.phoneSizePresetIndex === 0 ? 1.02 : 1.1)
                             font.weight: Style.fontWeightBold
-                            color: "#fff4ed"
+                            color: root.panelPrimaryTextColor
                             visible: text !== ""
                             wrapMode: Text.WordWrap
                             maximumLineCount: 2
@@ -2365,7 +2416,7 @@ Item {
                             Layout.fillWidth: true
                             text: root.embeddedMirrorDrawerStatusSubtitle(phonePreview)
                             pointSize: Style.fontSizeXS * (root.phoneSizePresetIndex === 0 ? 1.0 : 1.06)
-                            color: "#d9c8bb"
+                            color: root.panelSecondaryTextColor
                             visible: text !== ""
                             wrapMode: Text.WordWrap
                           }
@@ -2373,10 +2424,10 @@ Item {
                           Rectangle {
                             Layout.fillWidth: true
                             visible: root.setupRequiredLoopbackCommandVisible()
-                            color: "#2b211d"
+                            color: root.panelCardColor
                             radius: 14 * Style.uiScaleRatio
                             border.width: Style.borderS
-                            border.color: "#7d5b4e"
+                            border.color: root.panelCardOutlineColor
                             implicitHeight: drawerLoopbackCommandColumn.implicitHeight + (Style.marginM * 1.2)
 
                             ColumnLayout {
@@ -2392,14 +2443,14 @@ Item {
                                 NIcon {
                                   icon: "copy"
                                   pointSize: Style.fontSizeM
-                                  color: "#f4d0be"
+                                  color: root.panelAccentColor
                                 }
 
                                 NText {
                                   Layout.fillWidth: true
                                   text: root.trSafe("panel.setup-required.command-label", "Click to copy the loopback setup command")
                                   pointSize: Style.fontSizeS
-                                  color: "#f0d8ca"
+                                  color: root.panelSecondaryTextColor
                                   wrapMode: Text.WordWrap
                                 }
                               }
@@ -2408,7 +2459,7 @@ Item {
                                 Layout.fillWidth: true
                                 text: root.embeddedMirrorLoopbackSetupCommand
                                 pointSize: Style.fontSizeXS
-                                color: "#fff4ed"
+                                color: root.panelPrimaryTextColor
                                 wrapMode: Text.WrapAnywhere
                                 font.family: "monospace"
                               }
@@ -2455,7 +2506,7 @@ Item {
           Layout.fillWidth: true
           Layout.fillHeight: true
           Layout.minimumHeight: implicitHeight
-          color: "#1c1517"
+          color: root.panelCardColor
           radius: 24 * Style.uiScaleRatio
           implicitHeight: noDevicePairedContent.implicitHeight + (Style.marginL * 2.4)
 
@@ -2473,7 +2524,7 @@ Item {
                 text: KDEConnect.mainDevice?.name || root.trSafe("panel.unknown", "Unknown")
                 pointSize: Style.fontSizeXXL
                 font.weight: Style.fontWeightBold
-                color: "#fff4ed"
+                color: root.panelPrimaryTextColor
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
               }
@@ -2483,10 +2534,10 @@ Item {
               Layout.fillWidth: true
               Layout.fillHeight: true
               Layout.minimumHeight: pairStateColumn.implicitHeight + (Style.marginL * 1.8)
-              color: "#241b1d"
+              color: root.panelCardElevatedColor
               radius: 20 * Style.uiScaleRatio
               border.width: Style.borderS
-              border.color: "#6c4c3e"
+              border.color: root.panelCardOutlineColor
 
               ColumnLayout {
                 id: pairStateColumn
@@ -2507,15 +2558,15 @@ Item {
                       width: 48 * Style.uiScaleRatio
                       height: width
                       radius: width / 2
-                      color: KDEConnect.mainDevice.pairRequested ? "#3a261f" : "#2f231c"
+                      color: KDEConnect.mainDevice.pairRequested ? root.panelAccentBadgeColor : root.panelActionButtonBgColor
                       border.width: Style.borderS
-                      border.color: KDEConnect.mainDevice.pairRequested ? "#f4ae89" : "#6c4c3e"
+                      border.color: KDEConnect.mainDevice.pairRequested ? root.panelAccentBadgeBorderColor : root.panelCardOutlineColor
 
                       NIcon {
                         anchors.centerIn: parent
                         icon: KDEConnect.mainDevice.pairRequested ? "key" : "device-mobile"
                         pointSize: Style.fontSizeXL
-                        color: KDEConnect.mainDevice.pairRequested ? "#ffd7c3" : "#f4ae89"
+                        color: root.panelAccentColor
                       }
                     }
 
@@ -2528,7 +2579,7 @@ Item {
                           : root.trSafe("panel.pair-needed-title", "Pairing Needed")
                         pointSize: Style.fontSizeL * 1.06
                         font.weight: Style.fontWeightBold
-                        color: "#fff4ed"
+                        color: root.panelPrimaryTextColor
                       }
 
                       NText {
@@ -2536,7 +2587,7 @@ Item {
                           ? root.trSafe("panel.pair-requested-subtitle", "Approve the request on the phone to restore controls.")
                           : root.trSafe("panel.pair-needed-subtitle", "KDE Connect reported this device as temporarily unpaired.")
                         pointSize: Style.fontSizeS * 1.02
-                        color: "#cdb7ab"
+                        color: root.panelSecondaryTextColor
                       }
                     }
                   }
@@ -2547,7 +2598,7 @@ Item {
                   text: KDEConnect.mainDevice.pairRequested
                     ? root.trSafe("panel.pair-requested", "Confirm the pairing request on the phone. The mirror and device actions will come back automatically after approval.")
                     : root.trSafe("panel.pair-description", "This device is temporarily reported as unpaired. Retry pairing here if KDE Connect did not recover on its own after reconnecting.")
-                  color: "#d9c8bb"
+                  color: root.panelSecondaryTextColor
                   horizontalAlignment: Text.AlignHCenter
                   wrapMode: Text.WordWrap
                 }
@@ -2568,10 +2619,10 @@ Item {
                 Rectangle {
                   Layout.alignment: Qt.AlignHCenter
                   visible: KDEConnect.mainDevice.pairRequested && String(KDEConnect.mainDevice.verificationKey || "").trim() !== ""
-                  color: "#2e2220"
+                  color: root.panelAccentBadgeColor
                   radius: 14 * Style.uiScaleRatio
                   border.width: Style.borderS
-                  border.color: "#7d5b4e"
+                  border.color: root.panelAccentBadgeBorderColor
                   implicitWidth: verificationRow.implicitWidth + (Style.marginM * 1.4)
                   implicitHeight: verificationRow.implicitHeight + (Style.marginS * 1.4)
 
@@ -2583,14 +2634,14 @@ Item {
                     NIcon {
                       icon: "key"
                       pointSize: Style.fontSizeL
-                      color: "#f4d0be"
+                      color: root.panelAccentColor
                     }
 
                     NText {
                       text: KDEConnect.mainDevice.verificationKey
                       pointSize: Style.fontSizeL
                       font.weight: Style.fontWeightBold
-                      color: "#fff4ed"
+                      color: root.panelPrimaryTextColor
                     }
                   }
                 }
@@ -2607,7 +2658,7 @@ Item {
                   visible: KDEConnect.mainDevice.pairRequested
                   text: root.trSafe("panel.pair-waiting", "Waiting for the phone to accept the pairing request.")
                   pointSize: Style.fontSizeS
-                  color: "#bda99e"
+                  color: root.panelSecondaryTextColor
                   horizontalAlignment: Text.AlignHCenter
                   wrapMode: Text.WordWrap
                 }
@@ -2628,7 +2679,7 @@ Item {
           Layout.fillWidth: true
           Layout.fillHeight: true
           Layout.minimumHeight: implicitHeight
-          color: "#1c1517"
+          color: root.panelCardColor
           radius: 24 * Style.uiScaleRatio
           implicitHeight: setupRequiredContent.implicitHeight + (Style.marginL * 2.4)
 
@@ -2644,7 +2695,7 @@ Item {
               text: root.trSafe("panel.setup-required.phone-name", "Android Phone")
               pointSize: Style.fontSizeXXL
               font.weight: Style.fontWeightBold
-              color: "#fff4ed"
+              color: root.panelPrimaryTextColor
               Layout.fillWidth: true
               horizontalAlignment: Text.AlignHCenter
             }
@@ -2653,10 +2704,10 @@ Item {
               Layout.fillWidth: true
               Layout.fillHeight: true
               Layout.minimumHeight: setupRequiredColumn.implicitHeight + (Style.marginL * 1.8)
-              color: "#241b1d"
+              color: root.panelCardElevatedColor
               radius: 20 * Style.uiScaleRatio
               border.width: Style.borderS
-              border.color: "#6c4c3e"
+              border.color: root.panelCardOutlineColor
 
               ColumnLayout {
                 id: setupRequiredColumn
@@ -2677,15 +2728,15 @@ Item {
                       width: 48 * Style.uiScaleRatio
                       height: width
                       radius: width / 2
-                      color: "#2f231c"
+                      color: root.panelActionButtonBgColor
                       border.width: Style.borderS
-                      border.color: "#6c4c3e"
+                      border.color: root.panelCardOutlineColor
 
                       NIcon {
                         anchors.centerIn: parent
                         icon: "device-mobile-off"
                         pointSize: Style.fontSizeXL
-                        color: "#f4ae89"
+                        color: root.panelAccentColor
                       }
                     }
 
@@ -2696,13 +2747,13 @@ Item {
                         text: root.trSafe("panel.setup-required.title", "Finish Setup to Connect")
                         pointSize: Style.fontSizeL * 1.06
                         font.weight: Style.fontWeightBold
-                        color: "#fff4ed"
+                        color: root.panelPrimaryTextColor
                       }
 
                       NText {
                         text: root.trSafe("panel.setup-required.subtitle", "Link the phone first, then the mirror controls and status will appear here.")
                         pointSize: Style.fontSizeS * 1.02
-                        color: "#cdb7ab"
+                        color: root.panelSecondaryTextColor
                         wrapMode: Text.WordWrap
                       }
                     }
@@ -2712,7 +2763,7 @@ Item {
                 NText {
                   Layout.fillWidth: true
                   text: root.setupRequiredPairingStepText()
-                  color: "#d9c8bb"
+                  color: root.panelSecondaryTextColor
                   horizontalAlignment: Text.AlignHCenter
                   wrapMode: Text.WordWrap
                 }
@@ -2720,7 +2771,7 @@ Item {
                 NText {
                   Layout.fillWidth: true
                   text: root.setupRequiredAdbStepText()
-                  color: "#d9c8bb"
+                  color: root.panelSecondaryTextColor
                   horizontalAlignment: Text.AlignHCenter
                   wrapMode: Text.WordWrap
                 }
@@ -2728,7 +2779,7 @@ Item {
                 NText {
                   Layout.fillWidth: true
                   text: root.setupRequiredLoopbackStepText()
-                  color: "#d9c8bb"
+                  color: root.panelSecondaryTextColor
                   horizontalAlignment: Text.AlignHCenter
                   wrapMode: Text.WordWrap
                 }
@@ -2746,10 +2797,10 @@ Item {
                 Rectangle {
                   Layout.alignment: Qt.AlignHCenter
                   visible: root.mainDevicePairingInProgress() && String(KDEConnect.mainDevice?.verificationKey || "").trim() !== ""
-                  color: "#2e2220"
+                  color: root.panelAccentBadgeColor
                   radius: 14 * Style.uiScaleRatio
                   border.width: Style.borderS
-                  border.color: "#7d5b4e"
+                  border.color: root.panelAccentBadgeBorderColor
                   implicitWidth: setupVerificationRow.implicitWidth + (Style.marginM * 1.4)
                   implicitHeight: setupVerificationRow.implicitHeight + (Style.marginS * 1.4)
 
@@ -2761,14 +2812,14 @@ Item {
                     NIcon {
                       icon: "key"
                       pointSize: Style.fontSizeL
-                      color: "#f4d0be"
+                      color: root.panelAccentColor
                     }
 
                     NText {
                       text: KDEConnect.mainDevice?.verificationKey || ""
                       pointSize: Style.fontSizeL
                       font.weight: Style.fontWeightBold
-                      color: "#fff4ed"
+                      color: root.panelPrimaryTextColor
                     }
                   }
                 }
@@ -2784,7 +2835,7 @@ Item {
                   Layout.fillWidth: true
                   visible: root.mainDevicePairingInProgress()
                   text: root.trSafe("panel.setup-required.pair-waiting", "Approve the KDE Connect pairing request on the phone to continue.")
-                  color: "#d9c8bb"
+                  color: root.panelSecondaryTextColor
                   horizontalAlignment: Text.AlignHCenter
                   wrapMode: Text.WordWrap
                 }
@@ -2793,10 +2844,10 @@ Item {
                   Layout.alignment: Qt.AlignHCenter
                   Layout.fillWidth: true
                   visible: root.setupRequiredLoopbackCommandVisible()
-                  color: "#2b211d"
+                  color: root.panelCardColor
                   radius: 14 * Style.uiScaleRatio
                   border.width: Style.borderS
-                  border.color: "#7d5b4e"
+                  border.color: root.panelCardOutlineColor
                   implicitHeight: loopbackCommandColumn.implicitHeight + (Style.marginM * 1.2)
 
                   ColumnLayout {
@@ -2812,14 +2863,14 @@ Item {
                       NIcon {
                         icon: "copy"
                         pointSize: Style.fontSizeM
-                        color: "#f4d0be"
+                        color: root.panelAccentColor
                       }
 
                       NText {
                         Layout.fillWidth: true
                         text: root.trSafe("panel.setup-required.command-label", "Click to copy the loopback setup command")
                         pointSize: Style.fontSizeS
-                        color: "#f0d8ca"
+                        color: root.panelSecondaryTextColor
                         wrapMode: Text.WordWrap
                       }
                     }
@@ -2828,7 +2879,7 @@ Item {
                       Layout.fillWidth: true
                       text: root.embeddedMirrorLoopbackSetupCommand
                       pointSize: Style.fontSizeXS
-                      color: "#fff4ed"
+                      color: root.panelPrimaryTextColor
                       wrapMode: Text.WrapAnywhere
                       font.family: "monospace"
                     }
@@ -3186,7 +3237,7 @@ Item {
                   width: parent.width - (Style.marginM * 2)
                   text: root.trSafe("panel.wireless-adb.qr-placeholder", "Tap Start QR to generate a pairing code.")
                   visible: root.wirelessAdbQrImageSource() === ""
-                  color: "#4b5563"
+                  color: Color.mOnSurfaceVariant
                   horizontalAlignment: Text.AlignHCenter
                   wrapMode: Text.WordWrap
                 }
