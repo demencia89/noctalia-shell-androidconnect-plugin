@@ -1864,6 +1864,27 @@ Item {
       && (KDEConnect.scrcpyRunning || embeddedMirrorSnapshotFallbackForced());
   }
 
+  function embeddedMirrorNavRowVisible() {
+    if (!embeddedMirrorModeEnabled())
+      return false;
+
+    if (embeddedMirrorSnapshotFallbackForced())
+      return true;
+
+    if (KDEConnect.scrcpyRunning || KDEConnect.scrcpyLaunching)
+      return false;
+
+    // Avoid flashing disabled nav controls before embedded auto-start takes over.
+    if (embeddedMirrorAutoStartTimer.running
+        || panelOpenUnlockPending
+        || embeddedMirrorPendingSessionRecovery
+        || embeddedMirrorUsbRestoreRecoveryPending) {
+      return false;
+    }
+
+    return true;
+  }
+
   function refreshEmbeddedMirrorTouchMapping() {
     if (!embeddedMirrorModeEnabled()
         || (!KDEConnect.scrcpyRunning && !embeddedMirrorSnapshotFallbackForced()))
@@ -2878,7 +2899,7 @@ Item {
                         Layout.preferredWidth: phonePreviewContainer.width
                         Layout.fillWidth: false
                         spacing: Style.marginS
-                        visible: root.embeddedMirrorModeEnabled() && !KDEConnect.scrcpyRunning
+                        visible: root.embeddedMirrorNavRowVisible()
 
                         Item { Layout.fillWidth: true }
 
