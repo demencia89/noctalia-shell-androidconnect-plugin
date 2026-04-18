@@ -135,8 +135,6 @@ Item {
     ?? defaults.embeddedMirrorAudioEnabled
     ?? false
   )
-  property double embeddedMirrorLastAutoRecoveryAtMs: 0
-  readonly property int embeddedMirrorAutoRecoveryCooldownMs: 6500
   property bool embeddedMirrorPendingSessionRecovery: false
   property var embeddedMirrorRecoveryPreview: null
   property string embeddedMirrorRecoveryReason: ""
@@ -156,29 +154,6 @@ Item {
     running: root.visible && root.embeddedMirrorFeedConfigured()
     onTriggered: {
       root.ensureEmbeddedVideoDeviceAccessFresh(root.embeddedVideoDeviceAccessible ? 1800 : 900);
-
-      const preview = root.activePhonePreview;
-      if (!root.visible
-          || !root.embeddedMirrorModeEnabled()
-          || !KDEConnect.scrcpyRunning
-          || KDEConnect.scrcpyLaunching
-          || root.embeddedMirrorPendingSessionRecovery
-          || !preview
-          || root.embeddedMirrorFeedReattaching(preview)
-          || !preview.mirrorFeedRecoveryRecommended) {
-        return;
-      }
-
-      const launchStartedAt = Number(KDEConnect.scrcpyLaunchStartedAtMs || 0);
-      if (launchStartedAt > 0 && (Date.now() - launchStartedAt) < 3500)
-        return;
-
-      const lastRecoveryAt = Number(root.embeddedMirrorLastAutoRecoveryAtMs || 0);
-      if (lastRecoveryAt > 0 && (Date.now() - lastRecoveryAt) < root.embeddedMirrorAutoRecoveryCooldownMs)
-        return;
-
-      root.embeddedMirrorLastAutoRecoveryAtMs = Date.now();
-      root.requestEmbeddedMirrorSessionRecovery(preview, "invalid-frame-size");
     }
   }
 
@@ -1194,9 +1169,6 @@ Item {
       return true;
 
     if (!previewItem.mirrorFeedAvailable)
-      return true;
-
-    if (previewItem.mirrorFeedRecoveryRecommended)
       return true;
 
     if (previewItem.mirrorFeedError !== "")
