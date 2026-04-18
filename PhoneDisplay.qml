@@ -18,12 +18,16 @@ Rectangle {
   property string mirrorDeviceDescriptionMatch: ""
   property int mirrorContentWidth: 0
   property int mirrorContentHeight: 0
+  property int mirrorSourceWidth: 0
+  property int mirrorSourceHeight: 0
   property string mirrorFeedError: ""
   property bool mirrorFeedRestarting: false
   property bool mediaDevicesReloadPending: false
   property bool mirrorFeedAttachDelayActive: false
   property double mirrorFeedLastFrameAtMs: 0
   property bool mirrorFeedFrameLive: false
+  property int mirrorFeedInvalidFrameCount: 0
+  property bool mirrorFeedRecoveryRecommended: false
 
   readonly property real deviceArtWidth: 597
   readonly property real deviceArtHeight: 1241
@@ -46,6 +50,8 @@ Rectangle {
 
   readonly property real scaleFactor: Math.min(width / deviceArtWidth, height / deviceArtHeight)
   readonly property real contentAspectRatio: {
+    if (mirrorSourceWidth > 0 && mirrorSourceHeight > 0)
+      return mirrorSourceWidth / mirrorSourceHeight;
     if (mirrorContentWidth > 0 && mirrorContentHeight > 0)
       return mirrorContentWidth / mirrorContentHeight;
     return screen.width / Math.max(1, screen.height);
@@ -154,6 +160,7 @@ Rectangle {
   readonly property bool mirrorDisplayVisible: shouldActivateMirrorCamera
     && mirrorFeedError === ""
     && mirrorFeedFrameLive
+    && mirrorFeedHasValidSourceSize()
   radius: 0
   color: "transparent"
   border.width: 0
@@ -176,6 +183,133 @@ Rectangle {
 
   function hasMirrorContentSize() {
     return mirrorContentWidth > 0 && mirrorContentHeight > 0;
+  }
+
+  function mirrorFeedHasKnownSourceSize() {
+    return mirrorSourceWidth > 0 && mirrorSourceHeight > 0;
+  }
+
+  function mirrorFeedHasValidSourceSize() {
+    return mirrorFeedHasUsableFrameSize(mirrorSourceWidth, mirrorSourceHeight);
+  }
+
+  function mirrorFeedHasUsableFrameSize(width, height) {
+    const normalizedWidth = Math.max(0, Math.round(Number(width || 0)));
+    const normalizedHeight = Math.max(0, Math.round(Number(height || 0)));
+    return normalizedWidth >= 16
+      && normalizedHeight >= 16
+      && (normalizedWidth * normalizedHeight) >= 4096;
+  }
+
+  function resetMirrorFeedFrameTracking() {
+    mirrorSourceWidth = 0;
+    mirrorSourceHeight = 0;
+    mirrorFeedLastFrameAtMs = 0;
+    mirrorFeedFrameLive = false;
+    mirrorFeedInvalidFrameCount = 0;
+    mirrorFeedRecoveryRecommended = false;
+  }
+
+  function mirrorFrameSizeString(width, height) {
+    const normalizedWidth = Math.max(0, Math.round(Number(width || 0)));
+    const normalizedHeight = Math.max(0, Math.round(Number(height || 0)));
+    return normalizedWidth + "x" + normalizedHeight;
+  }
+
+  function readVideoFrameMetric(source, functionName, propertyName) {
+    if (!source)
+      return 0;
+
+    try {
+      if (functionName && typeof source[functionName] === "function")
+        return Math.max(0, Math.round(Number(source[functionName]())));
+    } catch (error) {
+    }
+
+    try {
+      if (propertyName && source[propertyName] !== undefined)
+        return Math.max(0, Math.round(Number(source[propertyName])));
+    } catch (error) {
+    }
+
+    return 0;
+  }
+
+  function extractMirrorFrameSize(frame) {
+    const directWidth = readVideoFrameMetric(frame, "width", "width");
+    const directHeight = readVideoFrameMetric(frame, "height", "height");
+    if (directWidth > 0 && directHeight > 0)
+      return { width: directWidth, height: directHeight };
+
+    const surfaceFormat = frame
+      ? (typeof frame.surfaceFormat === "function" ? frame.surfaceFormat() : frame.surfaceFormat)
+      : null;
+    const formatWidth = readVideoFrameMetric(surfaceFormat, "frameWidth", "frameWidth");
+    const formatHeight = readVideoFrameMetric(surfaceFormat, "frameHeight", "frameHeight");
+    if (formatWidth > 0 && formatHeight > 0)
+      return { width: formatWidth, height: formatHeight };
+
+    const frameSize = surfaceFormat
+      ? (typeof surfaceFormat.frameSize === "function" ? surfaceFormat.frameSize() : surfaceFormat.frameSize)
+      : null;
+    const frameSizeWidth = readVideoFrameMetric(frameSize, "width", "width");
+    const frameSizeHeight = readVideoFrameMetric(frameSize, "height", "height");
+    if (frameSizeWidth > 0 && frameSizeHeight > 0)
+      return { width: frameSizeWidth, height: frameSizeHeight };
+
+    return { width: 0, height: 0 };
+  }
+
+  function updateMirrorSourceSize(width, height) {
+    const normalizedWidth = Math.max(0, Math.round(Number(width || 0)));
+    const normalizedHeight = Math.max(0, Math.round(Number(height || 0)));
+    if (normalizedWidth <= 0 || normalizedHeight <= 0)
+      return false;
+
+    const changed = mirrorSourceWidth !== normalizedWidth || mirrorSourceHeight !== normalizedHeight;
+    mirrorSourceWidth = normalizedWidth;
+    mirrorSourceHeight = normalizedHeight;
+    return changed;
+  }
+
+  function syncMirrorSourceSizeFromVideoOutput() {
+    if (!mirrorVideoOutput)
+      return false;
+
+    const sourceRect = mirrorVideoOutput.sourceRect;
+    if (!sourceRect)
+      return false;
+
+    return updateMirrorSourceSize(sourceRect.width, sourceRect.height);
+  }
+
+  function invalidateMirrorFeedForSourceSize(width, height) {
+    const normalizedWidth = Math.max(0, Math.round(Number(width || 0)));
+    const normalizedHeight = Math.max(0, Math.round(Number(height || 0)));
+    if (normalizedWidth <= 0 || normalizedHeight <= 0)
+      return;
+
+    mirrorFeedLastFrameAtMs = 0;
+    mirrorFeedFrameLive = false;
+    mirrorFeedInvalidFrameCount += 1;
+    mirrorFeedError = "invalid video frame size " + mirrorFrameSizeString(normalizedWidth, normalizedHeight);
+    if (mirrorFeedInvalidFrameCount >= 3)
+      mirrorFeedRecoveryRecommended = true;
+  }
+
+  function evaluateMirrorSourceState() {
+    if (!mirrorFeedHasKnownSourceSize())
+      return;
+
+    if (mirrorFeedHasValidSourceSize()) {
+      mirrorFeedInvalidFrameCount = 0;
+      mirrorFeedRecoveryRecommended = false;
+      if (mirrorFeedError.indexOf("invalid video frame size ") === 0)
+        mirrorFeedError = "";
+      return;
+    }
+
+    invalidateMirrorFeedForSourceSize(mirrorSourceWidth, mirrorSourceHeight);
   }
 
   function formatAspectError(format) {
@@ -241,15 +375,29 @@ Rectangle {
       return;
 
     mirrorFeedError = "";
-    mirrorFeedLastFrameAtMs = 0;
-    mirrorFeedFrameLive = false;
+    resetMirrorFeedFrameTracking();
     mirrorFeedAttachDelayActive = true;
     mirrorFeedAttachDelayTimer.restart();
   }
 
-  function noteMirrorFrameDelivered() {
+  function noteMirrorFrameDelivered(frame) {
+    syncMirrorSourceSizeFromVideoOutput();
+    if (!mirrorFeedHasKnownSourceSize()) {
+      const extractedFrameSize = extractMirrorFrameSize(frame);
+      updateMirrorSourceSize(extractedFrameSize.width, extractedFrameSize.height);
+    }
+
+    if (mirrorFeedHasKnownSourceSize() && !mirrorFeedHasValidSourceSize()) {
+      invalidateMirrorFeedForSourceSize(mirrorSourceWidth, mirrorSourceHeight);
+      return;
+    }
+
     mirrorFeedLastFrameAtMs = Date.now();
     mirrorFeedFrameLive = true;
+    mirrorFeedInvalidFrameCount = 0;
+    mirrorFeedRecoveryRecommended = false;
+    if (mirrorFeedError.indexOf("invalid video frame size ") === 0)
+      mirrorFeedError = "";
   }
 
   function reloadMediaDevices() {
@@ -326,20 +474,20 @@ Rectangle {
     onActiveChanged: {
       if (active) {
         phoneRoot.mirrorFeedError = "";
-        phoneRoot.mirrorFeedLastFrameAtMs = 0;
-        phoneRoot.mirrorFeedFrameLive = false;
+        phoneRoot.resetMirrorFeedFrameTracking();
       } else {
+        phoneRoot.resetMirrorFeedFrameTracking();
         phoneRoot.mirrorFeedFrameLive = false;
       }
     }
 
     onCameraDeviceChanged: {
       phoneRoot.mirrorFeedError = "";
-      phoneRoot.mirrorFeedLastFrameAtMs = 0;
-      phoneRoot.mirrorFeedFrameLive = false;
+      phoneRoot.resetMirrorFeedFrameTracking();
     }
 
     onErrorOccurred: (error, errorString) => {
+      phoneRoot.resetMirrorFeedFrameTracking();
       phoneRoot.mirrorFeedFrameLive = false;
       phoneRoot.mirrorFeedError = errorString !== "" ? errorString : ("camera error " + error);
     }
@@ -349,8 +497,7 @@ Rectangle {
     mirrorFeedError = "";
     mirrorFeedRestarting = false;
     mediaDevicesReloadPending = false;
-    mirrorFeedLastFrameAtMs = 0;
-    mirrorFeedFrameLive = false;
+    resetMirrorFeedFrameTracking();
     mirrorFeedAttachDelayActive = mirrorFeedEnabled;
     if (mirrorFeedEnabled)
       mirrorFeedAttachDelayTimer.restart();
@@ -361,11 +508,10 @@ Rectangle {
   onMirrorFeedAvailableChanged: {
     if (mirrorFeedAvailable) {
       mirrorFeedError = "";
-      mirrorFeedLastFrameAtMs = 0;
-      mirrorFeedFrameLive = false;
+      resetMirrorFeedFrameTracking();
     } else {
       mirrorFeedRestarting = false;
-      mirrorFeedFrameLive = false;
+      resetMirrorFeedFrameTracking();
     }
   }
 
@@ -471,8 +617,14 @@ Rectangle {
         VideoOutput {
           id: mirrorVideoOutput
           anchors.fill: parent
-          visible: phoneRoot.mirrorDisplayVisible
+          visible: phoneRoot.shouldActivateMirrorCamera
+          opacity: phoneRoot.mirrorDisplayVisible ? 1 : 0
           fillMode: VideoOutput.Stretch
+
+          onSourceRectChanged: {
+            phoneRoot.syncMirrorSourceSizeFromVideoOutput();
+            phoneRoot.evaluateMirrorSourceState();
+          }
         }
 
         Connections {
@@ -480,7 +632,7 @@ Rectangle {
           enabled: target !== null && target !== undefined
 
           function onVideoFrameChanged(frame) {
-            phoneRoot.noteMirrorFrameDelivered();
+            phoneRoot.noteMirrorFrameDelivered(frame);
           }
         }
 
