@@ -71,7 +71,6 @@ QtObject {
   property bool reduceBackgroundRefresh: false
   readonly property int refreshIntervalMs: reduceBackgroundRefresh ? 20000 : 5000
   property double scrcpyLaunchStartedAtMs: 0
-  property int scrcpyFirstFrameLatencyMs: -1
 
   property bool anyDevicesConnected: false;
 
@@ -246,7 +245,6 @@ QtObject {
     v4l2SnapshotVersion = 0;
     v4l2SnapshotError = "";
     scrcpyLaunchStartedAtMs = Date.now();
-    scrcpyFirstFrameLatencyMs = -1;
     scrcpyCommandArgs = parsedCommand.args;
     Logger.i("KDEConnect", "Launching scrcpy session:",
       "mode=" + scrcpySessionMode,
@@ -405,26 +403,6 @@ QtObject {
       command = appendScrcpyOption(command, /(^|\s)--v4l2-buffer(?:=\S+|\s+\S+)\b/, "--v4l2-buffer=0");
     else
       command = appendScrcpyOption(command, /(^|\s)--video-buffer(?:=\S+|\s+\S+)\b/, "--video-buffer=0");
-
-    return command;
-  }
-
-  function applyConfiguredMirrorOptions(commandString: string, videoEncoder: string, videoCodecOptions: string, debugEnabled: bool): string {
-    let command = normalizeShellCommand(commandString);
-    const trimmedEncoder = String(videoEncoder || "").trim();
-    const trimmedCodecOptions = String(videoCodecOptions || "").trim();
-
-    if (command === "")
-      return "";
-
-    if (trimmedEncoder !== "")
-      command = appendScrcpyOption(command, /(^|\s)--video-encoder(?:=\S+|\s+\S+)\b/, "--video-encoder=" + shellQuote(trimmedEncoder));
-
-    if (trimmedCodecOptions !== "")
-      command = appendScrcpyOption(command, /(^|\s)--video-codec-options(?:=\S+|\s+\S+)\b/, "--video-codec-options=" + shellQuote(trimmedCodecOptions));
-
-    if (debugEnabled)
-      command = appendScrcpyOption(command, /(^|\s)--print-fps\b/, "--print-fps");
 
     return command;
   }
@@ -1670,7 +1648,6 @@ QtObject {
       root.scrcpySessionMode = "";
       root.scrcpyActiveSerial = "";
       root.scrcpyLaunchStartedAtMs = 0;
-      root.scrcpyFirstFrameLatencyMs = -1;
       root.adbScreenWidth = 0;
       root.adbScreenHeight = 0;
       root.adbScreenSerial = "";

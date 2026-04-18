@@ -36,24 +36,14 @@ Item {
     ? "transparent"
     : Color.mSurface
   readonly property bool blurEnabled: !(embeddedMirrorModeEnabled() && KDEConnect.scrcpyRunning && !embeddedMirrorFeedModeEnabled())
-  readonly property string phoneClickAction: cfg.phoneClickAction ?? defaults.phoneClickAction ?? "scrcpy"
-  readonly property string scrcpyCommand: cfg.scrcpyCommand ?? defaults.scrcpyCommand ?? "scrcpy"
-  readonly property bool scrcpyStopOnPanelClose: cfg.scrcpyStopOnPanelClose ?? defaults.scrcpyStopOnPanelClose ?? true
-  readonly property string wirelessAdbCommand: cfg.wirelessAdbCommand ?? defaults.wirelessAdbCommand ?? "adb tcpip 5555"
-  readonly property string embeddedScrcpyCommand: cfg.embeddedScrcpyCommand ?? defaults.embeddedScrcpyCommand ?? "scrcpy --no-audio --capture-orientation=@0"
-  property string mirrorPerformancePreset: cfg.mirrorPerformancePreset ?? defaults.mirrorPerformancePreset ?? "balanced"
-  readonly property string embeddedVideoEncoder: cfg.embeddedVideoEncoder ?? defaults.embeddedVideoEncoder ?? ""
-  readonly property string embeddedVideoCodecOptions: cfg.embeddedVideoCodecOptions ?? defaults.embeddedVideoCodecOptions ?? ""
-  readonly property bool mirrorReduceBackgroundPolling: cfg.mirrorReduceBackgroundPolling ?? defaults.mirrorReduceBackgroundPolling ?? true
-  readonly property bool mirrorDebugOverlayEnabled: cfg.mirrorDebugOverlayEnabled ?? defaults.mirrorDebugOverlayEnabled ?? false
-  readonly property string embeddedVideoDevice: cfg.embeddedVideoDevice ?? defaults.embeddedVideoDevice ?? "/dev/video10"
-  readonly property string embeddedVideoLabel: cfg.embeddedVideoLabel ?? defaults.embeddedVideoLabel ?? "scrcpy-panel"
+  readonly property string embeddedMirrorCommand: "scrcpy --no-audio --capture-orientation=@0"
+  readonly property bool reduceBackgroundRefreshWhileMirroring: true
+  readonly property string embeddedVideoDevice: "/dev/video10"
+  readonly property string embeddedVideoLabel: "scrcpy-panel"
   readonly property int embeddedMirrorSnapshotIntervalMs: Math.max(
     10,
     Math.round(cfg.embeddedMirrorSnapshotIntervalMs ?? defaults.embeddedMirrorSnapshotIntervalMs ?? 80)
   )
-  readonly property string adbDeviceSerialOverride: cfg.adbDeviceSerial ?? defaults.adbDeviceSerial ?? ""
-  readonly property bool wirelessAdbEnabled: cfg.wirelessAdbEnabled ?? defaults.wirelessAdbEnabled ?? true
   property string wirelessAdbPairHost: cfg.wirelessAdbPairHost ?? defaults.wirelessAdbPairHost ?? ""
   property string wirelessAdbPairPort: cfg.wirelessAdbPairPort ?? defaults.wirelessAdbPairPort ?? ""
   property string wirelessAdbPairingCode: ""
@@ -95,7 +85,7 @@ Item {
   property bool embeddedVideoDeviceAccessible: false
   property bool embeddedVideoDeviceCheckKnown: false
   property double embeddedVideoDeviceLastCheckAtMs: 0
-  readonly property bool embeddedMirrorDiagnosticsEnabled: mirrorDebugOverlayEnabled
+  readonly property bool embeddedMirrorDiagnosticsEnabled: false
   property bool embeddedMirrorForceSnapshotFallback: Boolean(
     cfg.embeddedMirrorForceSnapshotFallback
     ?? defaults.embeddedMirrorForceSnapshotFallback
@@ -293,22 +283,9 @@ Item {
     id: adbDevicesRefreshTimer
     interval: 2500
     repeat: true
-    running: root.visible && phoneClickAction === "scrcpy"
+    running: root.visible
     onTriggered: {
       KDEConnect.refreshAdbDevices();
-    }
-  }
-
-  Timer {
-    id: mirrorPerfProbeTimer
-    interval: 120
-    repeat: true
-    running: root.mirrorDebugOverlayEnabled
-      && root.embeddedMirrorModeEnabled()
-      && KDEConnect.scrcpyRunning
-      && KDEConnect.scrcpyFirstFrameLatencyMs < 0
-    onTriggered: {
-      root.captureMirrorFirstFrameLatency();
     }
   }
 
@@ -490,16 +467,10 @@ Item {
       Logger.w("KDEConnect", "Feed mode failed for embedded scrcpy:", errorText);
     }
 
-    function onScrcpyLaunchStartedAtMsChanged() {
-      if (KDEConnect.scrcpyRunning)
-        KDEConnect.scrcpyFirstFrameLatencyMs = -1;
-    }
-
     function onWirelessAdbFinished(success, message) {
       if (success) {
         const usedQrFlow = root.applyWirelessAdbQrSuccess(message);
-        if (root.wirelessAdbEnabled)
-          root.wirelessAdbSessionPreferred = true;
+        root.wirelessAdbSessionPreferred = true;
         KDEConnect.refreshAdbDevices();
         const body = usedQrFlow
           ? root.trSafe("panel.wireless-adb.qr-success-description", "Wireless ADB paired and connected from the QR code.")
@@ -513,7 +484,7 @@ Item {
         });
       } else {
         const body = message === "missing_command"
-          ? root.trSafe("panel.wireless-adb.missing-command-description", "Set a Wireless ADB command in the plugin settings")
+          ? root.trSafe("panel.wireless-adb.missing-command-description", "Wireless ADB could not start the built-in adb tcpip helper.")
           : message === "missing_pair_parameters"
             ? root.trSafe("panel.wireless-adb.missing-pair-parameters-description", "Enter the phone IP, pairing port, and pairing code")
             : message === "missing_connect_parameters"
@@ -539,9 +510,7 @@ Item {
     root.embeddedMirrorUsbRestoreRecoveryPending = false;
     root.panelOpenUnlockPending = false;
     root.panelOpenUnlockRetriesRemaining = 0;
-    if (scrcpyStopOnPanelClose) {
-      KDEConnect.forceStopScrcpyProcesses(root.embeddedVideoDevice);
-    }
+    KDEConnect.forceStopScrcpyProcesses(root.embeddedVideoDevice);
   }
 
   onVisibleChanged: {
@@ -580,13 +549,10 @@ Item {
       root.panelOpenUnlockPending = false;
       root.panelOpenUnlockRetriesRemaining = 0;
     }
-    if (!visible && scrcpyStopOnPanelClose)
+    if (!visible)
       KDEConnect.forceStopScrcpyProcesses(root.embeddedVideoDevice);
   }
 
-  onMirrorReduceBackgroundPollingChanged: root.syncBackgroundRefreshPolicy()
-  onEmbeddedMirrorEnabledChanged: root.syncBackgroundRefreshPolicy()
-  onPhoneClickActionChanged: root.syncBackgroundRefreshPolicy()
   onEmbeddedMirrorForceSnapshotFallbackChanged: {
     root.persistEmbeddedMirrorSnapshotFallbackMode();
     if (root.embeddedMirrorForceSnapshotFallback) {
@@ -616,28 +582,20 @@ Item {
     if (KDEConnect.mainDevice === null || !root.mainDeviceSetupComplete())
       return;
 
-    if (phoneClickAction === "scrcpy") {
-      if (!KDEConnect.scrcpyRunning
-          && !KDEConnect.scrcpyLaunching
-          && !root.scrcpyLaunchPrerequisitesReady()) {
-        KDEConnect.refreshAdbDevices();
-        return;
-      }
-
-      if (embeddedMirrorModeEnabled()) {
-        if (!root.embeddedMirrorSnapshotFallbackForced()
-            && root.embeddedMirrorFeedSessionDegraded(preview, 1800)) {
-          root.requestEmbeddedMirrorSessionRecovery(preview, "manual-retry");
-          return;
-        }
-        ensureEmbeddedMirrorSession(preview);
-      } else {
-        KDEConnect.toggleScrcpySession(KDEConnect.mainDevice.id, scrcpyCommand);
-      }
+    if (!KDEConnect.scrcpyRunning
+        && !KDEConnect.scrcpyLaunching
+        && !root.scrcpyLaunchPrerequisitesReady()) {
+      KDEConnect.refreshAdbDevices();
       return;
     }
 
-    KDEConnect.wakeUpDevice(KDEConnect.mainDevice.id);
+    if (!root.embeddedMirrorSnapshotFallbackForced()
+        && root.embeddedMirrorFeedSessionDegraded(preview, 1800)) {
+      root.requestEmbeddedMirrorSessionRecovery(preview, "manual-retry");
+      return;
+    }
+
+    ensureEmbeddedMirrorSession(preview);
   }
 
   function copyTextToClipboard(text, successMessage) {
@@ -716,13 +674,6 @@ Item {
   }
 
   function setupRequiredLoopbackStepText() {
-    if (!root.embeddedMirrorModeEnabled() || !root.embeddedMirrorFeedConfigured()) {
-      return root.trSafe(
-        "panel.setup-required.step-3-disabled",
-        "3. Embedded live feed is disabled in plugin settings."
-      );
-    }
-
     if (!root.embeddedVideoDeviceCheckKnown) {
       return root.trSafe(
         "panel.setup-required.step-3-checking",
@@ -920,41 +871,12 @@ Item {
     }
   }
 
-  function persistMirrorPerformancePreset(presetKey, preview) {
-    const nextPreset = String(presetKey || "").trim().toLowerCase();
-    if (nextPreset === "")
-      return;
-
-    if (nextPreset !== "balanced" && nextPreset !== "latency" && nextPreset !== "quality")
-      return;
-
-    if (mirrorPerformancePreset === nextPreset)
-      return;
-
-    mirrorPerformancePreset = nextPreset;
-
-    if (pluginApi) {
-      pluginApi.pluginSettings.mirrorPerformancePreset = nextPreset;
-      pluginApi.saveSettings();
-    }
-
-    if (root.embeddedMirrorModeEnabled() && KDEConnect.scrcpyRunning && !KDEConnect.scrcpyLaunching) {
-      root.requestEmbeddedMirrorSessionRecovery(preview || root.activePhonePreview, "preset-change");
-    }
-  }
-
   function phoneStatusTitle() {
-    if (phoneClickAction !== "scrcpy")
-      return pluginApi?.tr("panel.phone.wake-title") || "Wake Device";
-
     if (KDEConnect.scrcpyLaunching)
       return pluginApi?.tr("panel.scrcpy.starting-title") || "Starting scrcpy";
 
     if (KDEConnect.scrcpyRunning)
       return pluginApi?.tr("panel.scrcpy.running-title") || "scrcpy Active";
-
-    if ((scrcpyCommand || "").trim() === "")
-      return pluginApi?.tr("panel.scrcpy.not-configured-title") || "scrcpy Not Configured";
 
     const adbIssueTitle = adbSetupIssueTitle();
     if (adbIssueTitle !== "")
@@ -967,24 +889,15 @@ Item {
   }
 
   function phoneStatusSubtitle() {
-    if (phoneClickAction !== "scrcpy")
-      return pluginApi?.tr("panel.phone.wake-description") || "Click to wake the device";
-
     if (KDEConnect.scrcpyLaunching)
       return pluginApi?.tr("panel.scrcpy.starting-description") || "Preparing the control session";
 
     if (KDEConnect.scrcpyRunning)
       return pluginApi?.tr("panel.scrcpy.running-description") || "Click the phone tile again to stop the session";
 
-    if ((scrcpyCommand || "").trim() === "")
-      return pluginApi?.tr("panel.scrcpy.not-configured-description") || "Set a scrcpy command in the plugin settings";
-
     const adbIssueSubtitle = adbSetupIssueSubtitle();
     if (adbIssueSubtitle !== "")
       return adbIssueSubtitle;
-
-    if (KDEConnect.scrcpyLaunchError === "missing_command")
-      return pluginApi?.tr("panel.scrcpy.missing-command-description") || "Set a scrcpy command in the plugin settings";
 
     if (KDEConnect.scrcpyLaunchError !== "")
       return KDEConnect.scrcpyLaunchError;
@@ -1035,13 +948,9 @@ Item {
   }
 
   function adbSetupIssueTitle() {
-    if (phoneClickAction !== "scrcpy"
-        || KDEConnect.scrcpyRunning
+    if (KDEConnect.scrcpyRunning
         || KDEConnect.scrcpyLaunching
         || !root.mainDeviceSetupComplete())
-      return "";
-
-    if ((scrcpyCommand || "").trim() === "")
       return "";
 
     if (KDEConnect.adbDevicesExitCode !== 0)
@@ -1052,10 +961,6 @@ Item {
 
     if (adbSerialsInState("offline").length > 0)
       return trSafe("panel.scrcpy.adb-offline-title", "Reconnect ADB");
-
-    const serialOverride = (adbDeviceSerialOverride || "").trim();
-    if (serialOverride !== "" && !KDEConnect.adbDeviceSerialConnected(serialOverride))
-      return trSafe("panel.scrcpy.adb-serial-missing-title", "ADB Device Not Found");
 
     if (!KDEConnect.adbHasUsbTransport && connectedWirelessAdbSerial() === "")
       return trSafe("panel.scrcpy.adb-setup-title", "Connect ADB First");
@@ -1081,23 +986,13 @@ Item {
     if (adbSerialsInState("offline").length > 0)
       return trSafe("panel.scrcpy.adb-offline-description", "adb can see the phone, but it is not ready yet. Reconnect the cable, unlock the phone, and accept the USB debugging prompt again.");
 
-    const serialOverride = (adbDeviceSerialOverride || "").trim();
-    if (serialOverride !== "" && !KDEConnect.adbDeviceSerialConnected(serialOverride))
-      return trSafe("panel.scrcpy.adb-serial-missing-description", "The configured adb serial is not connected: ") + serialOverride;
-
-    if (!KDEConnect.adbHasUsbTransport && connectedWirelessAdbSerial() === "") {
-      return wirelessAdbEnabled
-        ? trSafe("panel.scrcpy.adb-setup-wireless-description", "Enable Developer options and USB debugging on the phone, connect it over USB once and accept the debugging prompt, or pair Wireless ADB from the Wi-Fi button.")
-        : trSafe("panel.scrcpy.adb-setup-description", "Enable Developer options and USB debugging on the phone, connect it over USB, and accept the debugging prompt for this computer.");
-    }
+    if (!KDEConnect.adbHasUsbTransport && connectedWirelessAdbSerial() === "")
+      return trSafe("panel.scrcpy.adb-setup-wireless-description", "Enable Developer options and USB debugging on the phone, connect it over USB once and accept the debugging prompt, or pair Wireless ADB from the Wi-Fi button.");
 
     return "";
   }
 
   function scrcpyLaunchPrerequisitesReady() {
-    if (phoneClickAction !== "scrcpy")
-      return false;
-
     if ((adbSetupIssueTitle() || "").trim() !== "")
       return false;
 
@@ -1105,7 +1000,7 @@ Item {
       if (embeddedMirrorSnapshotFallbackForced())
         return true;
 
-      if ((embeddedScrcpyCommand || "").trim() === "")
+      if ((embeddedMirrorCommand || "").trim() === "")
         return false;
 
       if (embeddedMirrorFeedConfigured()) {
@@ -1122,7 +1017,7 @@ Item {
       return true;
     }
 
-    return (scrcpyCommand || "").trim() !== "";
+    return false;
   }
 
   function initialCachedDeviceTelemetry() {
@@ -1284,14 +1179,6 @@ Item {
     pluginApi.saveSettings();
   }
 
-  function persistWirelessAdbMode(cableOnlyEnabled) {
-    if (!pluginApi)
-      return;
-
-    pluginApi.pluginSettings.wirelessAdbEnabled = !cableOnlyEnabled;
-    pluginApi.saveSettings();
-  }
-
   function openWirelessAdbDialog() {
     if ((wirelessAdbConnectHost || "").trim() === "" && (wirelessAdbPairHost || "").trim() !== "")
       wirelessAdbConnectHost = (wirelessAdbPairHost || "").trim();
@@ -1343,13 +1230,6 @@ Item {
   }
 
   function beginWirelessAdbQrPairing() {
-    if (!wirelessAdbEnabled) {
-      const body = trSafe("panel.wireless-adb.disabled-banner-description", "Wireless tools stay visible here for reference, but they are disabled until Wireless ADB is re-enabled in plugin settings.");
-      wirelessAdbStatusMessage = body;
-      ToastService.showWarning(trSafe("panel.wireless-adb.error-title", "Wireless ADB"), body, 5000);
-      return;
-    }
-
     if (KDEConnect.wirelessAdbBusy || wirelessAdbQrEncodeProc.running)
       return;
 
@@ -1393,20 +1273,7 @@ Item {
     return resolvedAdbSerial();
   }
 
-  function startWirelessAdbTcpipHelper() {
-    wirelessAdbStatusMessage = "";
-    persistWirelessAdbSettings();
-    KDEConnect.enableWirelessAdb(wirelessAdbCommand);
-  }
-
   function resolvedAdbSerial() {
-    const serialOverride = (adbDeviceSerialOverride || "").trim();
-    if (serialOverride !== "")
-      return serialOverride;
-
-    if (!wirelessAdbEnabled)
-      return KDEConnect.usbSelectionSentinel;
-
     const usbTransportAvailable = KDEConnect.adbHasUsbTransport;
     if (usbTransportAvailable && !wirelessAdbSessionPreferred)
       return KDEConnect.usbSelectionSentinel;
@@ -1429,46 +1296,13 @@ Item {
 
   function syncBackgroundRefreshPolicy() {
     KDEConnect.reduceBackgroundRefresh = root.visible
-      && root.mirrorReduceBackgroundPolling
+      && root.reduceBackgroundRefreshWhileMirroring
       && root.embeddedMirrorModeEnabled()
       && KDEConnect.scrcpyRunning;
   }
 
-  function captureMirrorFirstFrameLatency() {
-    if (!root.activePhonePreview
-        || KDEConnect.scrcpyLaunchStartedAtMs <= 0
-        || KDEConnect.scrcpyFirstFrameLatencyMs >= 0
-        || !root.embeddedMirrorViewActive(root.activePhonePreview))
-      return;
-
-    KDEConnect.scrcpyFirstFrameLatencyMs = Math.max(0, Math.round(Date.now() - KDEConnect.scrcpyLaunchStartedAtMs));
-  }
-
-  function mirrorPerfSummary() {
-    const parts = [];
-    const trimmedEncoder = (embeddedVideoEncoder || "").trim();
-
-    if (!wirelessAdbEnabled)
-      parts.push("USB");
-
-    if (trimmedEncoder !== "")
-      parts.push(trimmedEncoder);
-    else
-      parts.push(mirrorPerformancePreset);
-
-    if (KDEConnect.scrcpyFirstFrameLatencyMs >= 0)
-      parts.push(KDEConnect.scrcpyFirstFrameLatencyMs + "ms first frame");
-    else if (KDEConnect.scrcpyRunning)
-      parts.push("timing...");
-
-    if (mirrorReduceBackgroundPolling)
-      parts.push("poll " + Math.round(KDEConnect.refreshIntervalMs / 1000) + "s");
-
-    return parts.join(" • ");
-  }
-
   function embeddedMirrorModeEnabled() {
-    return phoneClickAction === "scrcpy";
+    return true;
   }
 
   function embeddedMirrorFeedConfigured() {
@@ -1763,15 +1597,9 @@ Item {
 
     if (!KDEConnect.scrcpyRunning && !KDEConnect.scrcpyLaunching) {
       let tunedEmbeddedCommand = KDEConnect.applyMirrorPerformancePreset(
-        embeddedScrcpyCommand,
-        mirrorPerformancePreset,
+        embeddedMirrorCommand,
+        "quality",
         feedModeEnabled
-      );
-      tunedEmbeddedCommand = KDEConnect.applyConfiguredMirrorOptions(
-        tunedEmbeddedCommand,
-        embeddedVideoEncoder,
-        embeddedVideoCodecOptions,
-        mirrorDebugOverlayEnabled
       );
       tunedEmbeddedCommand = KDEConnect.applyConfiguredMirrorAudioMode(
         tunedEmbeddedCommand,
@@ -1864,24 +1692,7 @@ Item {
   }
 
   function embeddedMirrorNavRowVisible() {
-    if (!embeddedMirrorModeEnabled())
-      return false;
-
-    if (embeddedMirrorSnapshotFallbackForced())
-      return true;
-
-    if (KDEConnect.scrcpyRunning || KDEConnect.scrcpyLaunching)
-      return false;
-
-    // Avoid flashing disabled nav controls before embedded auto-start takes over.
-    if (embeddedMirrorAutoStartTimer.running
-        || panelOpenUnlockPending
-        || embeddedMirrorPendingSessionRecovery
-        || embeddedMirrorUsbRestoreRecoveryPending) {
-      return false;
-    }
-
-    return true;
+    return embeddedMirrorModeEnabled();
   }
 
   function refreshEmbeddedMirrorTouchMapping() {
@@ -2064,18 +1875,12 @@ Item {
     if (!embeddedMirrorModeEnabled())
       return phoneStatusTitle();
 
-    if ((embeddedScrcpyCommand || "").trim() === "")
-      return trSafe("panel.embedded-mirror.not-configured-title", "Embedded Mirror Not Configured");
-
     const adbIssueTitle = adbSetupIssueTitle();
     if (adbIssueTitle !== "")
       return adbIssueTitle;
 
     if (embeddedMirrorSnapshotFallbackForced())
       return trSafe("panel.embedded-mirror.fallback-title", "Fallback Snapshot Active");
-
-    if (embeddedMirrorModeEnabled() && (embeddedVideoDevice || "").trim() === "")
-      return trSafe("panel.embedded-mirror.feed-not-configured-title", "Video Feed Not Configured");
 
     if (embeddedMirrorFeedConfigured() && embeddedVideoDeviceCheckKnown && !embeddedVideoDeviceAccessible)
       return trSafe("panel.embedded-mirror.feed-unavailable-title", "Video Feed Unavailable");
@@ -2117,9 +1922,6 @@ Item {
     if (!embeddedMirrorModeEnabled())
       return phoneStatusSubtitle();
 
-    if ((embeddedScrcpyCommand || "").trim() === "")
-      return trSafe("panel.embedded-mirror.not-configured-description", "Set an embedded scrcpy command in the plugin settings.");
-
     const adbIssueSubtitle = adbSetupIssueSubtitle();
     if (adbIssueSubtitle !== "")
       return adbIssueSubtitle;
@@ -2129,9 +1931,6 @@ Item {
         "Manual snapshot fallback is active. Press Feed to return to the live V4L2 feed.")
         + " " + embeddedMirrorRequiredFeedDeviceStatusText();
     }
-
-    if (embeddedMirrorModeEnabled() && (embeddedVideoDevice || "").trim() === "")
-      return trSafe("panel.embedded-mirror.feed-not-configured-description", "Set the V4L2 loopback device path in the plugin settings.");
 
     if (embeddedMirrorFeedConfigured() && embeddedVideoDeviceCheckKnown && !embeddedVideoDeviceAccessible)
       return trSafe("panel.embedded-mirror.feed-unavailable-description",
@@ -2745,9 +2544,7 @@ Item {
 
                           NIconButton {
                             icon: "wifi"
-                            tooltipText: !root.wirelessAdbEnabled
-                              ? root.trSafe("panel.wireless-adb.disabled-tooltip", "Wireless ADB is disabled in settings. Open details.")
-                              : KDEConnect.wirelessAdbBusy
+                            tooltipText: KDEConnect.wirelessAdbBusy
                               ? root.trSafe("panel.wireless-adb.busy-tooltip", "Wireless ADB command is running")
                               : root.trSafe("panel.wireless-adb.tooltip", "Open Wireless ADB tools")
                             baseSize: Style.baseWidgetSize * 0.8
@@ -2933,24 +2730,6 @@ Item {
                         Item { Layout.fillWidth: true }
                       }
 
-                      Rectangle {
-                        Layout.alignment: Qt.AlignHCenter
-                        visible: root.mirrorDebugOverlayEnabled && root.embeddedMirrorModeEnabled()
-                        implicitWidth: debugPerfText.implicitWidth + (Style.marginM * 1.6)
-                        implicitHeight: debugPerfText.implicitHeight + (Style.marginXS * 1.4)
-                        radius: implicitHeight / 2
-                        color: "#24191514"
-                        border.width: Style.borderS
-                        border.color: "#6c4c3e"
-
-                        NText {
-                          id: debugPerfText
-                          anchors.centerIn: parent
-                          text: root.mirrorPerfSummary()
-                          pointSize: Style.fontSizeXXS
-                          color: "#d7c4b8"
-                        }
-                      }
                     }
 
                     ColumnLayout {
@@ -3061,27 +2840,6 @@ Item {
                           }
                         }
 
-                        NComboBox {
-                          Layout.fillWidth: true
-                          visible: root.embeddedMirrorFeedModeEnabled()
-                          label: root.trSafe("settings.mirror-performance-preset.short-label", "Preset")
-                          model: [
-                            {
-                              "key": "latency",
-                              "name": pluginApi?.tr("settings.mirror-performance-preset.options.latency") || "Low latency"
-                            },
-                            {
-                              "key": "balanced",
-                              "name": pluginApi?.tr("settings.mirror-performance-preset.options.balanced") || "Balanced"
-                            },
-                            {
-                              "key": "quality",
-                              "name": pluginApi?.tr("settings.mirror-performance-preset.options.quality") || "Higher quality"
-                            }
-                          ]
-                          currentKey: root.mirrorPerformancePreset
-                          onSelected: key => root.persistMirrorPerformancePreset(key, phonePreview)
-                        }
                       }
 
                       Rectangle {
@@ -3940,45 +3698,6 @@ Item {
           Layout.fillWidth: true
         }
 
-        NToggle {
-          Layout.fillWidth: true
-          label: root.trSafe("panel.wireless-adb.cable-only-label", "Cable-only mode")
-          description: root.trSafe("panel.wireless-adb.cable-only-description", "Disable Wireless ADB fallback and force USB-only scrcpy and adb input for this plugin.")
-          checked: !root.wirelessAdbEnabled
-          onToggled: checked => root.persistWirelessAdbMode(checked)
-        }
-
-        Rectangle {
-          Layout.fillWidth: true
-          visible: !root.wirelessAdbEnabled
-          color: "#2b2118"
-          radius: Style.radiusM
-          border.color: "#d1a06c"
-          border.width: Style.borderS
-          implicitHeight: usbModeBannerColumn.implicitHeight + (Style.marginM * 2)
-
-          ColumnLayout {
-            id: usbModeBannerColumn
-            anchors.fill: parent
-            anchors.margins: Style.marginM
-            spacing: Style.marginXS
-
-            NText {
-              text: root.trSafe("panel.wireless-adb.disabled-banner-title", "Cable-only mode is active")
-              font.weight: Style.fontWeightBold
-              color: "#f6ddc2"
-              Layout.fillWidth: true
-            }
-
-            NText {
-              text: root.trSafe("panel.wireless-adb.disabled-banner-description", "Wireless tools stay visible here for reference, but they are disabled until Wireless ADB is re-enabled in plugin settings.")
-              color: "#e8ccb0"
-              wrapMode: Text.WordWrap
-              Layout.fillWidth: true
-            }
-          }
-        }
-
         Rectangle {
           Layout.fillWidth: true
           color: Color.mSurfaceVariant
@@ -3986,7 +3705,6 @@ Item {
           border.color: Color.mOutline
           border.width: Style.borderS
           implicitHeight: qrStep.implicitHeight + (Style.marginM * 2)
-          opacity: root.wirelessAdbEnabled ? 1.0 : 0.5
 
           ColumnLayout {
             id: qrStep
@@ -4058,7 +3776,7 @@ Item {
                         ? root.trSafe("panel.wireless-adb.qr-refresh-button", "Refresh QR")
                         : root.trSafe("panel.wireless-adb.qr-button", "Start QR Pairing"))
                   icon: "view-barcode-qr"
-                  enabled: root.wirelessAdbEnabled && !wirelessAdbQrEncodeProc.running && !KDEConnect.wirelessAdbBusy
+                  enabled: !wirelessAdbQrEncodeProc.running && !KDEConnect.wirelessAdbBusy
                   onClicked: root.beginWirelessAdbQrPairing()
                 }
 
@@ -4076,8 +3794,6 @@ Item {
         NTextInput {
           id: pairHostInput
           Layout.fillWidth: true
-          enabled: root.wirelessAdbEnabled
-          opacity: root.wirelessAdbEnabled ? 1.0 : 0.5
           label: root.trSafe("panel.wireless-adb.host-label", "Phone IP")
           placeholderText: "192.168.1.120"
           text: root.wirelessAdbPairHost
@@ -4095,7 +3811,6 @@ Item {
           border.color: Color.mOutline
           border.width: Style.borderS
           implicitHeight: pairStep.implicitHeight + (Style.marginM * 2)
-          opacity: root.wirelessAdbEnabled ? 1.0 : 0.5
 
           ColumnLayout {
             id: pairStep
@@ -4123,7 +3838,6 @@ Item {
 
               NTextInput {
                 Layout.preferredWidth: 150 * Style.uiScaleRatio
-                enabled: root.wirelessAdbEnabled
                 label: root.trSafe("panel.wireless-adb.pair-port-label", "Pair port")
                 placeholderText: "37099"
                 text: root.wirelessAdbPairPort
@@ -4133,7 +3847,6 @@ Item {
 
               NTextInput {
                 Layout.fillWidth: true
-                enabled: root.wirelessAdbEnabled
                 label: root.trSafe("panel.wireless-adb.pair-code-label", "Pairing code")
                 placeholderText: "123456"
                 text: root.wirelessAdbPairingCode
@@ -4151,8 +3864,7 @@ Item {
               NButton {
                 text: root.trSafe("panel.wireless-adb.pair-button", "Pair")
                 icon: "key"
-                enabled: root.wirelessAdbEnabled
-                  && !KDEConnect.wirelessAdbBusy
+                enabled: !KDEConnect.wirelessAdbBusy
                   && (root.wirelessAdbPairHost || "").trim() !== ""
                   && (root.wirelessAdbPairPort || "").trim() !== ""
                   && (root.wirelessAdbPairingCode || "").trim() !== ""
@@ -4169,7 +3881,6 @@ Item {
           border.color: Color.mOutline
           border.width: Style.borderS
           implicitHeight: connectStep.implicitHeight + (Style.marginM * 2)
-          opacity: root.wirelessAdbEnabled ? 1.0 : 0.5
 
           ColumnLayout {
             id: connectStep
@@ -4193,7 +3904,6 @@ Item {
 
             NTextInput {
               Layout.fillWidth: true
-              enabled: root.wirelessAdbEnabled
               label: root.trSafe("panel.wireless-adb.connect-port-label", "ADB port")
               placeholderText: "43127"
               text: root.wirelessAdbConnectPort
@@ -4217,8 +3927,7 @@ Item {
               NButton {
                 text: root.trSafe("panel.wireless-adb.connect-button", "Connect")
                 icon: "plug-connected"
-                enabled: root.wirelessAdbEnabled
-                  && !KDEConnect.wirelessAdbBusy
+                enabled: !KDEConnect.wirelessAdbBusy
                   && (((root.wirelessAdbConnectHost || "").trim() !== "") || ((root.wirelessAdbPairHost || "").trim() !== ""))
                   && (root.wirelessAdbConnectPort || "").trim() !== ""
                 onClicked: root.startWirelessAdbConnect()
