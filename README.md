@@ -2,6 +2,10 @@
 
 `AndroidConnect` is a Noctalia plugin for Android device status, quick actions, file transfer, and embedded `scrcpy` control inside the panel.
 
+## Support
+
+If you want to support ongoing work on AndroidConnect and the surrounding Noctalia projects, sponsor the work through GitHub Sponsors at [@demencia89](https://github.com/sponsors/demencia89).
+
 Current release: `v1.0.0`
 
 This project is built on top of the original Noctalia `kde-connect` plugin. Credit and thanks to the original Noctalia KDE Connect plugin developers for the base plugin and architecture this work extends.
