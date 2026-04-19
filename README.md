@@ -30,7 +30,7 @@ Project repository:
 
 ## Current Status
 
-Current plugin version: `1.3.0`
+Current plugin version: `1.3.1`
 
 The embedded mirror uses a single live feed path:
 
@@ -47,6 +47,7 @@ Current behavior:
 - Status and error messages stay hidden during the initial grace period, then appear only if the feed or input path is still not ready
 - Opening the panel while `scrcpy` is already connected sends unlock-only, not Home
 - Header brand badges use logo assets where available and fall back to icons otherwise
+- Embedded mirror attach reliability is improved significantly versus `1.3.0`, but the native Qt attach bug is not fully eliminated yet
 
 ## Features
 
@@ -205,7 +206,7 @@ If it fails:
 
 ## Known Issues
 
-- The embedded screen can sometimes remain black even when the rest of the plugin is working. Restarting the shell usually fixes it. In some cases it may take two shell restarts before the screen mirrors correctly again.
+- The embedded screen can sometimes remain black even when the rest of the plugin is working. `1.3.1` reduces how often this happens substantially, but it can still occur. Restarting the shell usually fixes it, and it should be needed much less often than before.
 - The embedded screen can sometimes appear glitchy or partially broken. Closing the plugin and opening it again usually fixes it. If not, restart the shell.
 
 ### Black Screen In The Embedded Mirror
