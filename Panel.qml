@@ -111,6 +111,7 @@ Item {
   property string dimScreenOriginalBrightness: ""
   property string dimScreenOriginalMode: ""
   readonly property int dimScreenBrightnessValue: 0
+  property int embeddedMirrorFormatLockRetryCount: 0
 
   anchors.fill: parent
 
@@ -142,6 +143,24 @@ Item {
           || !root.embeddedMirrorFeedConfigured()
           || !KDEConnect.scrcpyRunning
           || embeddedMirrorFormatLockProc.running) {
+        return;
+      }
+
+      embeddedMirrorFormatLockProc.running = true;
+    }
+  }
+
+  Timer {
+    id: embeddedMirrorFormatLockRetryTimer
+    interval: 260
+    repeat: false
+    onTriggered: {
+      if (!root.visible
+          || !root.embeddedMirrorFeedConfigured()
+          || !KDEConnect.scrcpyRunning
+          || embeddedMirrorFormatLockProc.running
+          || !root.activePhonePreview
+          || !root.activePhonePreview.mirrorFeedEnabled) {
         return;
       }
 
@@ -1460,7 +1479,16 @@ Item {
       + "; [ -n \"$stable_fmt\" ] && fmt=\"$stable_fmt\" || fmt=\"$prev_fmt\""
       + "; [ -n \"$fmt\" ] || exit 3"
       + "; v4l2-ctl -d \"$device\" -c keep_format=1 >/dev/null 2>&1 || exit 4"
+      + "; i=0; ready=0"
+      + "; while [ $i -lt 60 ]; do"
+      + " if v4l2-ctl -D -d \"$device\" >/dev/null 2>&1"
+      + " && v4l2-ctl --list-formats-ext -d \"$device\" >/dev/null 2>&1; then ready=1; break; fi"
+      + "; i=$((i+1))"
+      + "; sleep 0.05"
+      + "; done"
+      + "; [ \"$ready\" = 1 ] || exit 5"
       + "; printf 'locked_format=%s\\n' \"$fmt\""
+      + "; printf 'consumer_open_ready=1\\n'"
       + "; v4l2-ctl -d \"$device\" -C keep_format 2>/dev/null | sed 's/^/keep_format=/'"
     ]
 
@@ -1497,10 +1525,20 @@ Item {
       if (root.activePhonePreview)
         root.activePhonePreview.debugLog("formatLock exitCode=" + exitCode);
       if (exitCode === 0 && root.activePhonePreview) {
+        root.embeddedMirrorFormatLockRetryCount = 0;
         Qt.callLater(function() {
           if (root.activePhonePreview)
             root.activePhonePreview.probeNativeLoopback();
         });
+      } else if (exitCode === 5
+          && root.activePhonePreview
+          && root.activePhonePreview.mirrorFeedEnabled
+          && root.embeddedMirrorFormatLockRetryCount < 3) {
+        root.embeddedMirrorFormatLockRetryCount += 1;
+        root.activePhonePreview.debugLog("formatLock retry attempt=" + root.embeddedMirrorFormatLockRetryCount);
+        embeddedMirrorFormatLockRetryTimer.restart();
+      } else {
+        root.embeddedMirrorFormatLockRetryCount = 0;
       }
     }
   }
@@ -1698,6 +1736,30 @@ Item {
 
     keepScreenOnPending = true;
     KDEConnect.queryAdbScreenTimeout(serial);
+  }
+
+  function toggleMirrorScreenDim() {
+    const serial = String(dimScreenSerial || currentMirrorAdbSerial() || "").trim();
+    if (serial === "")
+      return;
+
+    if (dimScreenEnabled) {
+      restoreDimScreenState();
+      return;
+    }
+
+    dimScreenSerial = serial;
+    if (KDEConnect.hasFreshAdbScreenBrightness(serial)) {
+      dimScreenPending = false;
+      dimScreenEnabled = true;
+      dimScreenOriginalMode = String(KDEConnect.adbScreenBrightnessMode || "").trim();
+      dimScreenOriginalBrightness = String(KDEConnect.adbScreenBrightnessValue || "").trim();
+      KDEConnect.setAdbScreenBrightness(serial, String(dimScreenBrightnessValue));
+      return;
+    }
+
+    dimScreenPending = true;
+    KDEConnect.queryAdbScreenBrightness(serial);
   }
 
   function restoreKeepScreenOnState() {
