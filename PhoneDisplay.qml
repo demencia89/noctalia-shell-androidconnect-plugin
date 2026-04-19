@@ -54,6 +54,19 @@ Rectangle {
     readonly property real videoFrameGlobalHeight: videoFrame.height
     readonly property real screenRadius: 44.3 * phoneRoot.scaleFactor
     readonly property real videoFrameRadius: 52 * phoneRoot.scaleFactor
+    readonly property color frameShadowColor: Qt.alpha(Color.mOutline, 0.26)
+    readonly property color screenIdleBaseColor: Qt.alpha(Color.mSurface, 0.94)
+    readonly property color screenIdleTopColor: Qt.alpha(Color.mSurfaceVariant, 0.96)
+    readonly property color screenIdleMidColor: Qt.alpha(Color.mSurface, 0.92)
+    readonly property color screenIdleBottomColor: Qt.alpha(Color.mPrimaryContainer, 0.52)
+    readonly property color overlayFadeTopColor: Qt.alpha(Color.mSurface, 0.08)
+    readonly property color overlayFadeMidColor: Qt.alpha(Color.mSurface, 0.32)
+    readonly property color overlayFadeBottomColor: Qt.alpha(Color.mSurface, 0.58)
+    readonly property color overlayCardColor: Qt.alpha(Color.mSurfaceVariant, 0.9)
+    readonly property color overlayCardBorderColor: Qt.alpha(Color.mOutline, 0.34)
+    readonly property color overlayTitleColor: Color.mOnSurface
+    readonly property color overlaySubtitleColor: Color.mOnSurfaceVariant
+    readonly property color homeIndicatorColor: Qt.alpha(Color.mOnSurface, 0.66)
     readonly property string normalizedIdMatch: (mirrorDeviceIdMatch || "").trim().toLowerCase()
     readonly property string normalizedDescriptionMatch: (mirrorDeviceDescriptionMatch || "").trim().toLowerCase()
     readonly property string trimmedMirrorDevicePath: String(mirrorDeviceIdMatch || "").trim()
@@ -73,9 +86,14 @@ Rectangle {
     readonly property bool shouldActivateMirrorCamera: mirrorFeedEnabled
         && mirrorFeedAvailable
         && !mirrorFeedAttachDelayActive
+    readonly property bool mirrorFeedHasRenderedFrame: mirrorFeedFrameCount > 0
+    readonly property bool mirrorFeedHasSourceRect: {
+        const rect = mirrorVideoOutput ? mirrorVideoOutput.sourceRect : null;
+        return Boolean(rect) && Number(rect.width || 0) > 0 && Number(rect.height || 0) > 0;
+    }
     readonly property bool mirrorDisplayVisible: shouldActivateMirrorCamera
         && mirrorFeedError === ""
-        && mirrorFeedFrameLive
+        && (mirrorFeedFrameLive || mirrorFeedHasRenderedFrame || mirrorFeedHasSourceRect)
     readonly property string activeSourceRectSummary: {
         const rect = mirrorVideoOutput ? mirrorVideoOutput.sourceRect : null;
         const width = rect ? Math.round(Number(rect.width || 0)) : 0;
@@ -90,6 +108,7 @@ Rectangle {
     signal textRequested(string text)
     signal keyRequested(int keyCode)
     signal homeRequested()
+    signal recentsRequested()
 
     function hasVideoInput(input) {
         return input !== undefined && input !== null && !input.isNull;
@@ -190,8 +209,6 @@ Rectangle {
         if (!mirrorFirstFrameLogged) {
             mirrorFirstFrameLogged = true;
             debugLog("frame first sourceRect=" + activeSourceRectSummary);
-        } else if ((mirrorFeedFrameCount % 240) === 0) {
-            debugLog("frame count=" + mirrorFeedFrameCount + " sourceRect=" + activeSourceRectSummary);
         }
     }
 
@@ -251,14 +268,7 @@ Rectangle {
         }
     }
 
-    onMirrorFeedAvailableChanged: {
-        if (!mirrorFeedEnabled)
-            return;
-
-        debugLog("mirrorFeedAvailable=" + mirrorFeedAvailable
-            + " selectedInput=" + selectedVideoInputSummary);
-        resetMirrorState();
-    }
+    onMirrorFeedAvailableChanged: resetMirrorState()
 
     onMirrorFeedErrorChanged: {
         if (mirrorFeedEnabled && String(mirrorFeedError || "").trim() !== "")
@@ -287,8 +297,6 @@ Rectangle {
         onTriggered: {
             mediaDevicesLoader.active = true;
             phoneRoot.mediaDevicesReloadPending = false;
-            phoneRoot.debugLog("mediaDevicesReloadCommit active=" + mediaDevicesLoader.active
-                + " selectedInput=" + selectedVideoInputSummary);
         }
     }
 
@@ -342,18 +350,13 @@ Rectangle {
 
         active: phoneRoot.shouldActivateMirrorCamera
         onActiveChanged: {
-            phoneRoot.debugLog("camera active=" + active
-                + " selectedInput=" + selectedVideoInputSummary);
             if (active) {
                 phoneRoot.resetMirrorState();
             } else {
                 phoneRoot.mirrorFeedFrameLive = false;
             }
         }
-        onCameraDeviceChanged: {
-            phoneRoot.debugLog("cameraDeviceChanged selectedInput=" + selectedVideoInputSummary);
-            phoneRoot.resetMirrorState();
-        }
+        onCameraDeviceChanged: phoneRoot.resetMirrorState()
         onErrorOccurred: (error, errorString) => {
             phoneRoot.mirrorFeedFrameLive = false;
             phoneRoot.mirrorFeedError = phoneRoot.normalizeMirrorError(errorString !== "" ? errorString : ("camera error " + error));
@@ -416,7 +419,7 @@ Rectangle {
         radius: 34 * phoneRoot.scaleFactor
         blur: 24
         spread: 0.08
-        color: "#42000000"
+        color: phoneRoot.frameShadowColor
     }
 
     Item {
@@ -446,7 +449,7 @@ Rectangle {
             id: screen
 
             radius: phoneRoot.screenRadius
-            color: "#040506"
+            color: phoneRoot.screenIdleBaseColor
             antialiasing: true
             clip: true
             layer.enabled: !phoneRoot.mirrorDisplayVisible
@@ -466,17 +469,17 @@ Rectangle {
                 gradient: Gradient {
                     GradientStop {
                         position: 0
-                        color: "#161d2a"
+                        color: phoneRoot.screenIdleTopColor
                     }
 
                     GradientStop {
                         position: 0.55
-                        color: "#111825"
+                        color: phoneRoot.screenIdleMidColor
                     }
 
                     GradientStop {
                         position: 1
-                        color: "#07090d"
+                        color: phoneRoot.screenIdleBottomColor
                     }
                 }
 
@@ -505,7 +508,7 @@ Rectangle {
                     id: videoFrameBed
 
                     anchors.fill: parent
-                    color: "black"
+                    color: phoneRoot.screenIdleBaseColor
                     opacity: mirrorVideoReveal.opacity
 
                     Behavior on opacity {
@@ -608,6 +611,9 @@ Rectangle {
                         case Qt.Key_Delete:
                             phoneRoot.keyRequested(112);
                             return true;
+                        case Qt.Key_Home:
+                            phoneRoot.homeRequested();
+                            return true;
                         case Qt.Key_Escape:
                             phoneRoot.keyRequested(111);
                             return true;
@@ -658,7 +664,7 @@ Rectangle {
                             return;
                         }
                         if (mouse.button === Qt.MiddleButton) {
-                            phoneRoot.homeRequested();
+                            phoneRoot.recentsRequested();
                             return;
                         }
                         startLocalX = mouse.x;
@@ -741,7 +747,7 @@ Rectangle {
 
             Rectangle {
                 anchors.fill: parent
-                color: "#00000000"
+                color: "transparent"
                 visible: phoneRoot.showStatusOverlay && (phoneRoot.statusTitle !== "" || phoneRoot.statusSubtitle !== "" || phoneRoot.busy)
                 opacity: visible ? 1 : 0
 
@@ -759,17 +765,17 @@ Rectangle {
                     gradient: Gradient {
                         GradientStop {
                             position: 0
-                            color: "#14000000"
+                            color: phoneRoot.overlayFadeTopColor
                         }
 
                         GradientStop {
                             position: 0.55
-                            color: "#4d000000"
+                            color: phoneRoot.overlayFadeMidColor
                         }
 
                         GradientStop {
                             position: 1
-                            color: "#8a000000"
+                            color: phoneRoot.overlayFadeBottomColor
                         }
                     }
                 }
@@ -781,9 +787,9 @@ Rectangle {
                     width: parent.width - (22 * phoneRoot.scaleFactor)
                     implicitHeight: statusContent.implicitHeight + (20 * phoneRoot.scaleFactor)
                     radius: 14 * phoneRoot.scaleFactor
-                    color: "#bb12161d"
+                    color: phoneRoot.overlayCardColor
                     border.width: Math.max(1, Math.round(1 * phoneRoot.scaleFactor))
-                    border.color: "#26ffffff"
+                    border.color: phoneRoot.overlayCardBorderColor
 
                     ColumnLayout {
                         id: statusContent
@@ -803,7 +809,7 @@ Rectangle {
                         Text {
                             visible: phoneRoot.statusTitle !== ""
                             text: phoneRoot.statusTitle
-                            color: "white"
+                            color: phoneRoot.overlayTitleColor
                             textFormat: Text.PlainText
                             horizontalAlignment: Text.AlignHCenter
                             wrapMode: Text.Wrap
@@ -819,7 +825,7 @@ Rectangle {
                         Text {
                             visible: phoneRoot.statusSubtitle !== ""
                             text: phoneRoot.statusSubtitle
-                            color: "#E8E8E8"
+                            color: phoneRoot.overlaySubtitleColor
                             textFormat: Text.PlainText
                             horizontalAlignment: Text.AlignHCenter
                             wrapMode: Text.Wrap
@@ -855,7 +861,7 @@ Rectangle {
             width: 183 * phoneRoot.scaleFactor
             height: 4.8 * phoneRoot.scaleFactor
             radius: height / 2
-            color: "white"
+            color: phoneRoot.homeIndicatorColor
             opacity: 0.66
             visible: true
 

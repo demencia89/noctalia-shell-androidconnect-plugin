@@ -4,6 +4,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Services.System
 import qs.Services.UI
 
 QtObject {
@@ -62,6 +63,23 @@ QtObject {
   property string adbScreenTimeoutRaw: ""
   property string adbScreenTimeoutError: ""
   property string adbScreenTimeoutValue: ""
+  property string adbScreenBrightnessSerial: ""
+  property string adbScreenBrightnessKnownSerial: ""
+  property string adbScreenBrightnessRaw: ""
+  property string adbScreenBrightnessError: ""
+  property string adbScreenBrightnessValue: ""
+  property string adbScreenBrightnessMode: ""
+  property string adbScreenshotSerial: ""
+  property string adbScreenshotPath: ""
+  property string adbScreenshotError: ""
+  readonly property bool adbScreenshotBusy: adbScreenshotProc.running
+  property string adbScreenRecordingSerial: ""
+  property string adbScreenRecordingRemotePath: ""
+  property string adbScreenRecordingLocalPath: ""
+  property string adbScreenRecordingError: ""
+  property bool adbScreenRecordingStopRequested: false
+  readonly property bool adbScreenRecordingActive: adbScreenRecordingProc.running
+  readonly property bool adbScreenRecordingBusy: adbScreenRecordingProc.running || adbScreenRecordingFinalizeProc.running || adbScreenRecordingStopProc.running
   property string adbQueuedSerial: ""
   property var adbQueuedArgs: []
   property string adbQueuedKind: ""
@@ -78,6 +96,7 @@ QtObject {
   signal adbDevicesRefreshed()
   signal adbScreenStateRefreshed(string serial, bool unlockNeeded, bool interactive, string lockState)
   signal adbScreenTimeoutRead(string serial, string value, bool success)
+  signal adbScreenBrightnessRead(string serial, string mode, string value, bool success)
 
   onDevicesChanged: {
     setMainDevice(root.mainDeviceId)
@@ -191,6 +210,126 @@ QtObject {
 
   function wakeUpDevice(deviceId: string): void {
     startProcessComponent(wakeUpDeviceComponent, { deviceId: deviceId });
+  }
+
+  function formatActionFailure(action: string, stderrText: string, exitCode: int): string {
+    const actionLabel = String(action || "").trim() !== "" ? String(action).trim() : "Operation";
+    const details = String(stderrText || "").trim();
+
+    if (details !== "")
+      return actionLabel + " failed: " + details;
+
+    if (exitCode !== 0)
+      return actionLabel + " failed (exit code " + exitCode + ").";
+
+    return actionLabel + " failed.";
+  }
+
+  function escapeNotificationMarkdown(text: string): string {
+    return String(text || "")
+      .replace(/\\/g, "\\\\")
+      .replace(/\[/g, "\\[")
+      .replace(/\]/g, "\\]")
+      .replace(/\(/g, "\\(")
+      .replace(/\)/g, "\\)")
+      .replace(/\*/g, "\\*")
+      .replace(/_/g, "\\_")
+      .replace(/`/g, "\\`");
+  }
+
+  function notificationFileUrl(path: string): string {
+    const trimmedPath = String(path || "").trim();
+    if (trimmedPath === "")
+      return "";
+
+    const encodedSegments = trimmedPath.split("/").map(segment => encodeURIComponent(segment));
+    return "file://" + encodedSegments.join("/");
+  }
+
+  function notificationParentDirectory(path: string): string {
+    const trimmedPath = String(path || "").trim();
+    const lastSlash = trimmedPath.lastIndexOf("/");
+    if (lastSlash <= 0)
+      return "";
+    return trimmedPath.slice(0, lastSlash);
+  }
+
+  function notificationHistoryLink(label: string, path: string): string {
+    const fileUrl = notificationFileUrl(path);
+    if (fileUrl === "")
+      return "";
+    return "[" + escapeNotificationMarkdown(label) + "](" + fileUrl + ")";
+  }
+
+  function notificationHistoryId(prefix: string): string {
+    const trimmedPrefix = String(prefix || "androidconnect").trim();
+    const safePrefix = trimmedPrefix !== ""
+      ? trimmedPrefix.replace(/[^a-zA-Z0-9_-]+/g, "-")
+      : "androidconnect";
+    return safePrefix + "-" + String(Date.now()) + "-" + String(Math.random()).slice(2, 8);
+  }
+
+  function addHistoryNotification(summary: string, body: string, urgency = 1, options = {}): void {
+    const resolvedSummary = String(summary || "").trim();
+    const resolvedBody = String(body || "").trim();
+    const resolvedOptions = options && typeof options === "object" ? options : ({});
+    const fallbackSummary = resolvedSummary !== "" ? resolvedSummary : "AndroidConnect";
+    const fallbackBody = resolvedBody !== "" ? resolvedBody : fallbackSummary;
+
+    NotificationService.addToHistory({
+      id: notificationHistoryId(resolvedOptions.idPrefix || "androidconnect"),
+      summary: fallbackSummary,
+      summaryMarkdown: String(resolvedOptions.summaryMarkdown || "").trim() || escapeNotificationMarkdown(fallbackSummary),
+      body: fallbackBody,
+      bodyMarkdown: String(resolvedOptions.bodyMarkdown || "").trim() || escapeNotificationMarkdown(fallbackBody),
+      appName: String(resolvedOptions.appName || "AndroidConnect"),
+      urgency: urgency < 0 || urgency > 2 ? 1 : urgency,
+      expireTimeout: 0,
+      timestamp: new Date(),
+      originalImage: "",
+      cachedImage: "",
+      actionsJson: "[]",
+      originalId: 0
+    });
+  }
+
+  function showNoticeWithHistory(summary: string, body: string, icon = "", timeout = 3200, options = {}): void {
+    ToastService.showNotice(summary, body, icon, timeout);
+    addHistoryNotification(summary, body, 1, options);
+  }
+
+  function showWarningWithHistory(summary: string, body: string, timeout = 5000, options = {}): void {
+    ToastService.showWarning(summary, body, timeout);
+    addHistoryNotification(summary, body, 1, options);
+  }
+
+  function showErrorWithHistory(message: string, options = {}): void {
+    const resolvedOptions = options && typeof options === "object" ? options : ({});
+    const summary = String(resolvedOptions.summary || "AndroidConnect").trim() || "AndroidConnect";
+    const body = String(message || "").trim() || summary;
+    ToastService.showError(body);
+    addHistoryNotification(summary, body, 2, resolvedOptions);
+  }
+
+  function savedMediaNotificationOptions(title: string, outputPath: string, idPrefix: string): var {
+    const directoryPath = notificationParentDirectory(outputPath);
+    const directoryLink = notificationHistoryLink("Open folder", directoryPath);
+    const linkedTitle = notificationHistoryLink(title, directoryPath);
+    const escapedPath = escapeNotificationMarkdown(outputPath);
+
+    return {
+      idPrefix: idPrefix,
+      summaryMarkdown: linkedTitle !== "" ? linkedTitle : escapeNotificationMarkdown(title),
+      bodyMarkdown: directoryLink !== ""
+        ? escapedPath + "\n\n" + directoryLink
+        : escapedPath
+    };
+  }
+
+  function notifyActionFailure(action: string, stderrText: string, exitCode: int): void {
+    const message = formatActionFailure(action, stderrText, exitCode);
+    Logger.w("KDEConnect", message);
+    showErrorWithHistory(message);
   }
 
   function startProcessComponent(component, properties = {}): void {
@@ -615,6 +754,56 @@ QtObject {
       .concat(args.map(arg => String(arg)));
   }
 
+  function buildOutputPath(directoryName: string, filePrefix: string, extension: string): string {
+    const homeDir = String(Quickshell.env("HOME") || "").trim();
+    const baseDir = homeDir !== ""
+      ? (homeDir + "/" + String(directoryName || "").trim() + "/AndroidConnect")
+      : "/tmp/AndroidConnect";
+    const stamp = Qt.formatDateTime(new Date(), "yyyyMMdd-HHmmss");
+    return baseDir + "/" + String(filePrefix || "capture").trim() + "-" + stamp + String(extension || "");
+  }
+
+  function takeAdbScreenshot(serial: string): bool {
+    const trimmedSerial = String(serial || "").trim();
+    if (trimmedSerial === "" || adbScreenshotProc.running)
+      return false;
+
+    adbScreenshotSerial = trimmedSerial;
+    adbScreenshotPath = buildOutputPath("Pictures", "androidconnect-screenshot", ".png");
+    adbScreenshotError = "";
+    adbScreenshotProc.running = true;
+    return true;
+  }
+
+  function startAdbScreenRecording(serial: string): bool {
+    const trimmedSerial = String(serial || "").trim();
+    if (trimmedSerial === "" || adbScreenRecordingBusy)
+      return false;
+
+    const stamp = Qt.formatDateTime(new Date(), "yyyyMMdd-HHmmss");
+    adbScreenRecordingSerial = trimmedSerial;
+    adbScreenRecordingRemotePath = "/sdcard/Download/androidconnect-recording-" + stamp + ".mp4";
+    adbScreenRecordingLocalPath = buildOutputPath("Videos", "androidconnect-recording", ".mp4");
+    adbScreenRecordingError = "";
+    adbScreenRecordingStopRequested = false;
+    adbScreenRecordingProc.running = true;
+    showNoticeWithHistory("Screen Recording", "Recording started.", "video");
+    Logger.i("KDEConnect", "ADB screen recording started:",
+      "serial=" + adbScreenRecordingSerial,
+      "remote=" + adbScreenRecordingRemotePath,
+      "local=" + adbScreenRecordingLocalPath);
+    return true;
+  }
+
+  function stopAdbScreenRecording(): bool {
+    if (!adbScreenRecordingProc.running || adbScreenRecordingStopProc.running)
+      return false;
+
+    adbScreenRecordingStopRequested = true;
+    adbScreenRecordingStopProc.running = true;
+    return true;
+  }
+
   function adbSelectorArgsForSerial(serial: string): var {
     const trimmedSerial = String(serial || "").trim();
     if (isUsbSelectionSerial(trimmedSerial))
@@ -636,7 +825,7 @@ QtObject {
       "if printf '%s\\n' \"$policy\" | grep -Eq 'showing=true|mShowingLockscreen=true|isStatusBarKeyguard=true'; then locked=true;"
         + " elif printf '%s\\n' \"$policy\" | grep -Eq 'showing=false|mShowingLockscreen=false|isStatusBarKeyguard=false'; then locked=false; fi",
       "if [ \"$interactive\" != true ]; then input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true; sleep 0.05; fi",
-      "if [ \"$locked\" = true ]; then input keyevent 82 >/dev/null 2>&1 || true; sleep 0.10; fi"
+      "if [ \"$locked\" = true ]; then input keyevent 82 >/dev/null 2>&1 || true; sleep 0.10; fi",
     ].join("; ");
     const script = [
       "device=" + shellQuote(device),
@@ -753,6 +942,13 @@ QtObject {
       && adbScreenTimeoutError === "";
   }
 
+  function hasFreshAdbScreenBrightness(serial: string): bool {
+    const trimmedSerial = String(serial || "").trim();
+    return trimmedSerial !== ""
+      && adbScreenBrightnessKnownSerial === trimmedSerial
+      && adbScreenBrightnessError === "";
+  }
+
   function queryAdbScreenState(serial: string): bool {
     const trimmedSerial = String(serial || "").trim();
     if (trimmedSerial === ""
@@ -801,6 +997,29 @@ QtObject {
     ]);
   }
 
+  function queryAdbScreenBrightness(serial: string): bool {
+    const trimmedSerial = String(serial || "").trim();
+    if (trimmedSerial === ""
+        || adbScreenBrightnessSerial !== ""
+        || hasQueuedAdbTask("screen-brightness", trimmedSerial))
+      return false;
+
+    adbScreenBrightnessSerial = trimmedSerial;
+    adbScreenBrightnessKnownSerial = "";
+    adbScreenBrightnessRaw = "";
+    adbScreenBrightnessError = "";
+    adbScreenBrightnessValue = "";
+    adbScreenBrightnessMode = "";
+    return queueAdbTask("screen-brightness", trimmedSerial, [
+      "shell",
+      "sh",
+      "-c",
+      "brightness=$(settings get system screen_brightness 2>/dev/null || true)"
+      + "; mode=$(settings get system screen_brightness_mode 2>/dev/null || true)"
+      + "; printf 'brightness=%s\\nmode=%s\\n' \"$brightness\" \"$mode\""
+    ]);
+  }
+
   function setAdbScreenTimeout(serial: string, timeoutValue: string): bool {
     const trimmedSerial = String(serial || "").trim();
     const trimmedValue = String(timeoutValue || "").trim();
@@ -814,6 +1033,27 @@ QtObject {
       "system",
       "screen_off_timeout",
       trimmedValue
+    ]);
+  }
+
+  function setAdbScreenBrightness(serial: string, brightnessValue: string): bool {
+    const trimmedSerial = String(serial || "").trim();
+    const trimmedBrightness = String(brightnessValue || "").trim();
+    if (trimmedSerial === "" || trimmedBrightness === "")
+      return false;
+
+    let normalizedBrightness = Number(trimmedBrightness);
+    if (!isFinite(normalizedBrightness))
+      return false;
+
+    normalizedBrightness = Math.max(0, Math.min(255, normalizedBrightness));
+
+    return queueAdbTask("screen-brightness-set", trimmedSerial, [
+      "shell",
+      "cmd",
+      "display",
+      "set-brightness",
+      (normalizedBrightness / 255).toFixed(4)
     ]);
   }
 
@@ -832,6 +1072,42 @@ QtObject {
       "delete",
       "system",
       "screen_off_timeout"
+    ]);
+  }
+
+  function restoreAdbScreenBrightness(serial: string, modeValue: string, brightnessValue: string): bool {
+    const trimmedSerial = String(serial || "").trim();
+    const trimmedMode = String(modeValue || "").trim();
+    const trimmedBrightness = String(brightnessValue || "").trim();
+    if (trimmedSerial === "")
+      return false;
+
+    if (trimmedMode === "1") {
+      return queueAdbTask("screen-brightness-restore", trimmedSerial, [
+        "shell",
+        "cmd",
+        "display",
+        "reset-brightness-configuration"
+      ]);
+    }
+
+    if (/^\d+$/.test(trimmedBrightness)) {
+      let normalizedBrightness = Number(trimmedBrightness);
+      normalizedBrightness = Math.max(0, Math.min(255, normalizedBrightness));
+      return queueAdbTask("screen-brightness-restore", trimmedSerial, [
+        "shell",
+        "cmd",
+        "display",
+        "set-brightness",
+        (normalizedBrightness / 255).toFixed(4)
+      ]);
+    }
+
+    return queueAdbTask("screen-brightness-restore", trimmedSerial, [
+      "shell",
+      "cmd",
+      "display",
+      "reset-brightness-configuration"
     ]);
   }
 
@@ -966,7 +1242,7 @@ QtObject {
   function notifyProcessFailure(action: string, deviceId: string, stderrText: string, exitCode: int): void {
     const message = formatProcessFailure(action, deviceId, stderrText, exitCode);
     Logger.w("KDEConnect", message);
-    ToastService.showError(message);
+    showErrorWithHistory(message);
   }
 
   property Process detectBusctlProc: Process {
@@ -1517,6 +1793,31 @@ QtObject {
         }
 
         root.adbScreenTimeoutSerial = "";
+      } else if (commandKind === "screen-brightness") {
+        root.adbScreenBrightnessRaw = stdoutText;
+
+        if (exitCode === 0) {
+          const brightnessMatch = stdoutText.match(/(?:^|\n)brightness=([^\n]*)/);
+          const modeMatch = stdoutText.match(/(?:^|\n)mode=([^\n]*)/);
+          root.adbScreenBrightnessValue = brightnessMatch ? String(brightnessMatch[1] || "").trim() : "";
+          root.adbScreenBrightnessMode = modeMatch ? String(modeMatch[1] || "").trim() : "";
+          root.adbScreenBrightnessKnownSerial = commandSerial;
+          root.adbScreenBrightnessError = "";
+          root.adbScreenBrightnessRead(commandSerial, root.adbScreenBrightnessMode, root.adbScreenBrightnessValue, true);
+          Logger.i("KDEConnect", "ADB screen brightness:",
+            "serial=" + commandSerial,
+            "mode=" + root.adbScreenBrightnessMode,
+            "brightness=" + root.adbScreenBrightnessValue);
+        } else {
+          root.adbScreenBrightnessKnownSerial = "";
+          root.adbScreenBrightnessValue = "";
+          root.adbScreenBrightnessMode = "";
+          root.adbScreenBrightnessError = stderrText !== "" ? stderrText : ("adb screen brightness exited with code " + exitCode);
+          root.adbScreenBrightnessRead(commandSerial, "", "", false);
+          Logger.w("KDEConnect", "adb screen brightness failed:", root.adbScreenBrightnessError);
+        }
+
+        root.adbScreenBrightnessSerial = "";
       } else if (exitCode !== 0) {
         Logger.w("KDEConnect", "ADB input command failed:",
           "kind=" + commandKind,
@@ -1526,6 +1827,156 @@ QtObject {
       }
 
       root.finishCurrentAdbTask();
+    }
+  }
+
+  property Process adbScreenshotProc: Process {
+    id: adbScreenshotProc
+    running: false
+    command: ["sh", "-lc",
+      "file=" + root.shellQuote(root.adbScreenshotPath)
+      + "; dir=$(dirname \"$file\")"
+      + "; mkdir -p \"$dir\""
+      + " && " + root.shellJoinArgs(root.adbCommand(root.adbScreenshotSerial, ["exec-out", "screencap", "-p"]))
+      + " > \"$file\""
+      + " && [ -s \"$file\" ]"
+      + " || { status=$?; rm -f \"$file\" 2>/dev/null || true; exit \"$status\"; }"
+    ]
+
+    stderr: StdioCollector {
+      onStreamFinished: {
+        root.adbScreenshotError = text.trim();
+      }
+    }
+
+    onExited: (exitCode, exitStatus) => {
+      const outputPath = root.adbScreenshotPath;
+      const errorText = root.adbScreenshotError;
+
+      if (exitCode === 0) {
+        showNoticeWithHistory(
+          "Screenshot Saved",
+          outputPath,
+          "camera",
+          3200,
+          savedMediaNotificationOptions("Screenshot Saved", outputPath, "androidconnect-screenshot")
+        );
+        Logger.i("KDEConnect", "ADB screenshot saved:", outputPath);
+      } else {
+        root.notifyActionFailure("Take screenshot", errorText, exitCode);
+      }
+
+      root.adbScreenshotSerial = "";
+      root.adbScreenshotPath = "";
+      root.adbScreenshotError = "";
+    }
+  }
+
+  property Process adbScreenRecordingProc: Process {
+    id: adbScreenRecordingProc
+    running: false
+    command: root.adbCommand(root.adbScreenRecordingSerial, [
+      "shell",
+      "screenrecord",
+      "--bit-rate",
+      "16000000",
+      root.adbScreenRecordingRemotePath
+    ])
+
+    stderr: StdioCollector {
+      onStreamFinished: {
+        root.adbScreenRecordingError = text.trim();
+      }
+    }
+
+    onExited: (exitCode, exitStatus) => {
+      if (root.adbScreenRecordingRemotePath !== "" && root.adbScreenRecordingLocalPath !== "") {
+        root.adbScreenRecordingFinalizeProc.running = true;
+        return;
+      }
+
+      if (exitCode !== 0)
+        root.notifyActionFailure("Screen recording", root.adbScreenRecordingError, exitCode);
+
+      root.adbScreenRecordingSerial = "";
+      root.adbScreenRecordingRemotePath = "";
+      root.adbScreenRecordingLocalPath = "";
+      root.adbScreenRecordingError = "";
+      root.adbScreenRecordingStopRequested = false;
+    }
+  }
+
+  property Process adbScreenRecordingStopProc: Process {
+    id: adbScreenRecordingStopProc
+    running: false
+    command: root.adbCommand(root.adbScreenRecordingSerial, [
+      "shell",
+      "sh",
+      "-c",
+      "pkill -INT -x screenrecord >/dev/null 2>&1"
+      + " || killall -2 screenrecord >/dev/null 2>&1"
+      + " || { pid=$(pidof screenrecord 2>/dev/null | awk '{print $1}'); [ -n \"$pid\" ] && kill -2 \"$pid\" >/dev/null 2>&1; }"
+    ])
+
+    stderr: StdioCollector {
+      onStreamFinished: {
+        const details = text.trim();
+        if (details !== "")
+          root.adbScreenRecordingError = details;
+      }
+    }
+
+    onExited: (exitCode, exitStatus) => {
+      if (exitCode !== 0 && root.adbScreenRecordingProc.running) {
+        root.adbScreenRecordingStopRequested = false;
+        root.notifyActionFailure("Stop screen recording", root.adbScreenRecordingError, exitCode);
+      }
+    }
+  }
+
+  property Process adbScreenRecordingFinalizeProc: Process {
+    id: adbScreenRecordingFinalizeProc
+    running: false
+    command: ["sh", "-lc",
+      "file=" + root.shellQuote(root.adbScreenRecordingLocalPath)
+      + "; remote=" + root.shellQuote(root.adbScreenRecordingRemotePath)
+      + "; dir=$(dirname \"$file\")"
+      + "; mkdir -p \"$dir\""
+      + " && " + root.shellJoinArgs(root.adbCommand(root.adbScreenRecordingSerial, ["pull", root.adbScreenRecordingRemotePath, root.adbScreenRecordingLocalPath])) + " >/dev/null"
+      + " && [ -s \"$file\" ]"
+      + " && " + root.shellJoinArgs(root.adbCommand(root.adbScreenRecordingSerial, ["shell", "rm", "-f", root.adbScreenRecordingRemotePath])) + " >/dev/null 2>&1"
+      + " || { status=$?; rm -f \"$file\" 2>/dev/null || true; exit \"$status\"; }"
+    ]
+
+    stderr: StdioCollector {
+      onStreamFinished: {
+        const details = text.trim();
+        if (details !== "")
+          root.adbScreenRecordingError = details;
+      }
+    }
+
+    onExited: (exitCode, exitStatus) => {
+      const outputPath = root.adbScreenRecordingLocalPath;
+
+      if (exitCode === 0) {
+        showNoticeWithHistory(
+          "Screen Recording Saved",
+          outputPath,
+          "video",
+          3200,
+          savedMediaNotificationOptions("Screen Recording Saved", outputPath, "androidconnect-recording")
+        );
+        Logger.i("KDEConnect", "ADB screen recording saved:", outputPath);
+      } else {
+        root.notifyActionFailure("Screen recording", root.adbScreenRecordingError, exitCode);
+      }
+
+      root.adbScreenRecordingSerial = "";
+      root.adbScreenRecordingRemotePath = "";
+      root.adbScreenRecordingLocalPath = "";
+      root.adbScreenRecordingError = "";
+      root.adbScreenRecordingStopRequested = false;
     }
   }
 
@@ -1644,6 +2095,12 @@ QtObject {
       root.adbScreenTimeoutRaw = "";
       root.adbScreenTimeoutError = "";
       root.adbScreenTimeoutValue = "";
+      root.adbScreenBrightnessSerial = "";
+      root.adbScreenBrightnessKnownSerial = "";
+      root.adbScreenBrightnessRaw = "";
+      root.adbScreenBrightnessError = "";
+      root.adbScreenBrightnessValue = "";
+      root.adbScreenBrightnessMode = "";
       root.adbDisplayInfoSerial = "";
       root.adbDisplayInfoStdout = "";
       root.adbDisplayInfoStderr = "";

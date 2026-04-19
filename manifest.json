@@ -1,7 +1,7 @@
 {
   "id": "androidconnect",
   "name": "AndroidConnect",
-  "version": "1.2.4",
+  "version": "1.3.0",
   "minNoctaliaVersion": "4.4.0",
   "author": "demencia89",
   "official": false,

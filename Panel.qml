@@ -27,6 +27,33 @@ Item {
 
   readonly property bool allowAttach: true
   readonly property color panelBackgroundColor: Color.mSurface
+  readonly property color shellPrimaryTextColor: Color.mOnSurface
+  readonly property color shellSecondaryTextColor: Color.mOnSurfaceVariant
+  readonly property color shellPrimaryIconColor: Color.mPrimary
+  readonly property color shellButtonBgColor: Color.mSurfaceVariant
+  readonly property color shellButtonFgColor: Color.mPrimary
+  readonly property color shellButtonBgHoverColor: Color.mHover
+  readonly property color shellButtonFgHoverColor: Color.mOnHover
+  readonly property color shellButtonBorderColor: Style.boxBorderColor
+  readonly property color shellButtonBorderHoverColor: Color.mOutline
+  readonly property color shellButtonActiveBgColor: Color.mPrimary
+  readonly property color shellButtonActiveFgColor: Color.mOnPrimary
+  readonly property color shellButtonActiveBorderColor: Color.mPrimary
+  readonly property color shellIconChipColor: Qt.alpha(Color.mPrimaryContainer, 0.8)
+  readonly property color shellIconChipBorderColor: Qt.alpha(Color.mPrimary, 0.42)
+  readonly property color shellIconChipFgColor: Color.mOnPrimaryContainer
+  readonly property color shellStageColor: Qt.alpha(Color.mSurface, 0.94)
+  readonly property color shellCardColor: Qt.alpha(Color.mSurfaceVariant, 0.84)
+  readonly property color shellCardBorderColor: Style.boxBorderColor
+  readonly property color shellNestedCardColor: Qt.alpha(Color.mSurface, 0.9)
+  readonly property color shellNestedCardBorderColor: Qt.alpha(Color.mOutline, 0.56)
+  readonly property color shellAccentCardColor: Qt.alpha(Color.mPrimaryContainer, 0.88)
+  readonly property color shellAccentCardBorderColor: Qt.alpha(Color.mPrimary, 0.42)
+  readonly property color shellAccentIconColor: Color.mOnPrimaryContainer
+  readonly property color shellAccentTextColor: Color.mOnPrimaryContainer
+  readonly property url androidBrandBadgeSource: Qt.resolvedUrl("./Assets/brand-badges/android.svg")
+  readonly property url googleBrandBadgeSource: Qt.resolvedUrl("./Assets/brand-badges/google.svg")
+  readonly property url xiaomiBrandBadgeSource: Qt.resolvedUrl("./Assets/brand-badges/xiaomi.svg")
   readonly property bool blurEnabled: true
   readonly property string embeddedMirrorCommand: "scrcpy --no-audio --capture-orientation=@0 --max-size=960 --max-fps=60 --video-bit-rate=12M --video-codec=h264 --v4l2-buffer=0"
   readonly property bool reduceBackgroundRefreshWhileMirroring: true
@@ -78,6 +105,12 @@ Item {
   property string keepScreenOnSerial: ""
   property string keepScreenOnOriginalTimeout: ""
   readonly property int keepScreenOnTimeoutMs: 2147483647
+  property bool dimScreenPending: false
+  property bool dimScreenEnabled: false
+  property string dimScreenSerial: ""
+  property string dimScreenOriginalBrightness: ""
+  property string dimScreenOriginalMode: ""
+  readonly property int dimScreenBrightnessValue: 0
 
   anchors.fill: parent
 
@@ -292,7 +325,7 @@ Item {
               ? message
               : root.trSafe("panel.wireless-adb.success-description", "ADB over TCP/IP enabled"));
         root.wirelessAdbStatusMessage = body;
-        ToastService.showNotice(root.trSafe("panel.wireless-adb.success-title", "Wireless ADB"), body, "wifi");
+        KDEConnect.showNoticeWithHistory(root.trSafe("panel.wireless-adb.success-title", "Wireless ADB"), body, "wifi");
         root.scheduleTouchMappingRefresh();
       } else {
         const body = message === "missing_command"
@@ -305,7 +338,7 @@ Item {
                 ? root.trSafe("panel.wireless-adb.missing-qr-parameters-description", "Generate a fresh Wireless ADB QR code and try again.")
               : message;
         root.wirelessAdbStatusMessage = body;
-        ToastService.showWarning(root.trSafe("panel.wireless-adb.error-title", "Wireless ADB"), body, 5000);
+        KDEConnect.showWarningWithHistory(root.trSafe("panel.wireless-adb.error-title", "Wireless ADB"), body, 5000);
       }
     }
 
@@ -334,9 +367,27 @@ Item {
       root.keepScreenOnOriginalTimeout = String(value || "").trim();
       KDEConnect.setAdbScreenTimeout(root.keepScreenOnSerial, String(root.keepScreenOnTimeoutMs));
     }
+
+    function onAdbScreenBrightnessRead(serial, mode, value, success) {
+      if (!root.dimScreenPending)
+        return;
+
+      if (String(serial || "").trim() !== root.dimScreenSerial)
+        return;
+
+      root.dimScreenPending = false;
+      if (!success)
+        return;
+
+      root.dimScreenEnabled = true;
+      root.dimScreenOriginalMode = String(mode || "").trim();
+      root.dimScreenOriginalBrightness = String(value || "").trim();
+      KDEConnect.setAdbScreenBrightness(root.dimScreenSerial, String(root.dimScreenBrightnessValue));
+    }
   }
 
   Component.onDestruction: {
+    root.restoreDimScreenState();
     root.restoreKeepScreenOnState();
     KDEConnect.reduceBackgroundRefresh = false;
     embeddedMirrorAutoStartTimer.stop();
@@ -365,6 +416,7 @@ Item {
       root.scheduleEmbeddedMirrorAutoStart();
     }
     if (!visible) {
+      root.restoreDimScreenState();
       root.restoreKeepScreenOnState();
       root.panelVisibleSinceMs = 0;
       root.panelStatusGraceElapsed = true;
@@ -414,7 +466,7 @@ Item {
       return;
 
     Quickshell.execDetached(["wl-copy", trimmedText]);
-    ToastService.showNotice(
+    KDEConnect.showNoticeWithHistory(
       root.trSafe("panel.setup-required.copy-title", "AndroidConnect"),
       successMessage || root.trSafe("panel.setup-required.copy-success", "Copied to clipboard."),
       "copy"
@@ -642,6 +694,47 @@ Item {
 
     const text = String(translated);
     return (text === "" || text.startsWith("!!")) ? fallback : text;
+  }
+
+  function deviceBrandBadge(deviceName) {
+    const brandName = String(deviceName || "").trim().toLowerCase();
+    const isApple = brandName.indexOf("iphone") !== -1
+      || brandName.indexOf("ipad") !== -1
+      || brandName.indexOf("apple") !== -1;
+    const isGoogle = brandName.indexOf("pixel") !== -1
+      || brandName.indexOf("google") !== -1;
+    const isXiaomiFamily = brandName.indexOf("xiaomi") !== -1
+      || brandName.indexOf("redmi") !== -1
+      || brandName.indexOf("poco") !== -1;
+    const fallbackIcon = isApple
+      ? "brand-apple"
+      : (isGoogle ? "brand-google" : "brand-android");
+
+    if (isGoogle) {
+      return {
+        source: googleBrandBadgeSource,
+        fallbackIcon: fallbackIcon
+      };
+    }
+
+    if (isXiaomiFamily) {
+      return {
+        source: xiaomiBrandBadgeSource,
+        fallbackIcon: fallbackIcon
+      };
+    }
+
+    if (brandName.indexOf("android") !== -1) {
+      return {
+        source: androidBrandBadgeSource,
+        fallbackIcon: fallbackIcon
+      };
+    }
+
+    return {
+      source: "",
+      fallbackIcon: fallbackIcon
+    };
   }
 
   function adbDeviceStateEntries() {
@@ -925,7 +1018,7 @@ Item {
     if (host === "" || port === "" || pairingCode === "") {
       const body = trSafe("panel.wireless-adb.missing-pair-parameters-description", "Enter the phone IP, pairing port, and pairing code");
       wirelessAdbStatusMessage = body;
-      ToastService.showWarning(trSafe("panel.wireless-adb.error-title", "Wireless ADB"), body, 5000);
+      KDEConnect.showWarningWithHistory(trSafe("panel.wireless-adb.error-title", "Wireless ADB"), body, 5000);
       return;
     }
 
@@ -945,7 +1038,7 @@ Item {
     if (host === "" || port === "") {
       const body = trSafe("panel.wireless-adb.missing-connect-parameters-description", "Enter the phone IP and connect port");
       wirelessAdbStatusMessage = body;
-      ToastService.showWarning(trSafe("panel.wireless-adb.error-title", "Wireless ADB"), body, 5000);
+      KDEConnect.showWarningWithHistory(trSafe("panel.wireless-adb.error-title", "Wireless ADB"), body, 5000);
       return;
     }
 
@@ -1368,8 +1461,7 @@ Item {
       + "; [ -n \"$fmt\" ] || exit 3"
       + "; v4l2-ctl -d \"$device\" -c keep_format=1 >/dev/null 2>&1 || exit 4"
       + "; printf 'locked_format=%s\\n' \"$fmt\""
-      + "; v4l2-ctl -d \"$device\" -C keep_format 2>/dev/null | sed 's/^/keep_format: /'"
-      + "; v4l2-ctl --list-formats-ext -d \"$device\" 2>/dev/null | sed -n '1,24p' | sed 's/^/formats: /'"
+      + "; v4l2-ctl -d \"$device\" -C keep_format 2>/dev/null | sed 's/^/keep_format=/'"
     ]
 
     stdout: StdioCollector {
@@ -1441,7 +1533,7 @@ Item {
       root.wirelessAdbQrPendingLaunch = false;
       const body = root.trSafe("panel.wireless-adb.qr-generate-error-description", "Failed to generate the Wireless ADB QR code.");
       root.wirelessAdbStatusMessage = body;
-      ToastService.showWarning(root.trSafe("panel.wireless-adb.error-title", "Wireless ADB"), body, 5000);
+      KDEConnect.showWarningWithHistory(root.trSafe("panel.wireless-adb.error-title", "Wireless ADB"), body, 5000);
     }
   }
 
@@ -1566,11 +1658,23 @@ Item {
       KDEConnect.runAdbKeyevent(serial, 82); // MENU / dismiss keyguard
   }
 
-  function turnPhysicalScreenOff() {
+  function takeMirrorScreenshot() {
     if (!embeddedMirrorInputActive())
       return;
 
-    KDEConnect.runAdbKeyevent(currentMirrorAdbSerial(), 223); // SLEEP
+    KDEConnect.takeAdbScreenshot(currentMirrorAdbSerial());
+  }
+
+  function toggleMirrorScreenRecording() {
+    if (KDEConnect.adbScreenRecordingActive) {
+      KDEConnect.stopAdbScreenRecording();
+      return;
+    }
+
+    if (!embeddedMirrorInputActive())
+      return;
+
+    KDEConnect.startAdbScreenRecording(currentMirrorAdbSerial());
   }
 
   function toggleKeepScreenOnWhilePanelOpen() {
@@ -1607,11 +1711,24 @@ Item {
     keepScreenOnOriginalTimeout = "";
   }
 
+  function restoreDimScreenState() {
+    const serial = String(dimScreenSerial || "").trim();
+    dimScreenPending = false;
+    if (serial !== "" && dimScreenEnabled)
+      KDEConnect.restoreAdbScreenBrightness(serial, dimScreenOriginalMode, dimScreenOriginalBrightness);
+
+    dimScreenEnabled = false;
+    dimScreenSerial = "";
+    dimScreenOriginalMode = "";
+    dimScreenOriginalBrightness = "";
+  }
+
   component NavActionButton: Rectangle {
     id: navButton
 
     property string iconName: ""
     property string label: ""
+    property string tooltipText: ""
     property bool actionEnabled: true
     property bool active: false
     property bool circular: false
@@ -1673,6 +1790,14 @@ Item {
       enabled: navButton.actionEnabled
       hoverEnabled: navButton.actionEnabled
       cursorShape: navButton.actionEnabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+      onEntered: {
+        if (navButton.tooltipText !== "")
+          TooltipService.show(navButton, navButton.tooltipText, "top");
+      }
+      onExited: {
+        if (navButton.tooltipText !== "")
+          TooltipService.hide(navButton);
+      }
       onClicked: navButton.pressed()
     }
 
@@ -1700,6 +1825,39 @@ Item {
         font.weight: Style.fontWeightMedium
         color: navButton.actionEnabled ? Color.mOnSurface : Color.mOnSurfaceVariant
       }
+    }
+  }
+
+  component PanelActionIconButton: NIconButton {
+    id: panelActionIconButton
+
+    property bool active: false
+
+    baseSize: Style.baseWidgetSize * 0.8
+    colorBg: active ? root.shellButtonActiveBgColor : root.shellButtonBgColor
+    colorFg: active ? root.shellButtonActiveFgColor : root.shellButtonFgColor
+    colorBgHover: active ? root.shellButtonActiveBgColor : root.shellButtonBgHoverColor
+    colorFgHover: active ? root.shellButtonActiveFgColor : root.shellButtonFgHoverColor
+    colorBorder: active ? root.shellButtonActiveBorderColor : root.shellButtonBorderColor
+    colorBorderHover: active ? root.shellButtonActiveBorderColor : root.shellButtonBorderHoverColor
+  }
+
+  component UtilityActionCard: NBox {
+    id: utilityCard
+
+    default property alias contentData: utilityCardContent.data
+
+    Layout.fillWidth: true
+    implicitHeight: utilityCardContent.implicitHeight + Style.margin2M
+
+    GridLayout {
+      id: utilityCardContent
+      anchors.fill: parent
+      anchors.margins: Style.marginM
+      rows: 1
+      flow: GridLayout.LeftToRight
+      columnSpacing: Style.marginM
+      rowSpacing: 0
     }
   }
 
@@ -1899,19 +2057,33 @@ Item {
                         Layout.fillWidth: true
 
                         Rectangle {
+                          readonly property var brandBadge: root.deviceBrandBadge(KDEConnect.mainDevice?.name || "")
+                          readonly property bool brandBadgeFrameless: brandBadge.source !== ""
                           Layout.alignment: Qt.AlignVCenter
                           Layout.preferredWidth: 34 * Style.uiScaleRatio
                           Layout.preferredHeight: 34 * Style.uiScaleRatio
                           radius: 17 * Style.uiScaleRatio
-                          color: "#211814"
-                          border.width: Style.borderS
-                          border.color: "#6c4c3e"
+                          color: brandBadgeFrameless ? "transparent" : root.shellIconChipColor
+                          border.width: brandBadgeFrameless ? 0 : Style.borderS
+                          border.color: brandBadgeFrameless ? "transparent" : root.shellIconChipBorderColor
+
+                          Image {
+                            anchors.centerIn: parent
+                            visible: parent.brandBadge.source !== ""
+                            source: parent.brandBadge.source
+                            width: parent.brandBadgeFrameless ? parent.width : parent.width * 0.72
+                            height: parent.brandBadgeFrameless ? parent.height : parent.height * 0.72
+                            fillMode: Image.PreserveAspectFit
+                            smooth: true
+                            mipmap: true
+                          }
 
                           NIcon {
                             anchors.centerIn: parent
-                            icon: "device-mobile"
+                            visible: parent.brandBadge.source === ""
+                            icon: parent.brandBadge.fallbackIcon
                             pointSize: Style.fontSizeS
-                            color: "#f4ae89"
+                            color: root.shellPrimaryTextColor
                           }
                         }
 
@@ -1919,7 +2091,7 @@ Item {
                           text: KDEConnect.mainDevice.name
                           pointSize: Style.fontSizeL * 1.55
                           font.weight: Style.fontWeightBold
-                          color: "#fff5ef"
+                          color: root.shellPrimaryTextColor
                           Layout.fillWidth: true
                           elide: Text.ElideRight
                         }
@@ -1928,17 +2100,10 @@ Item {
                           Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
                           spacing: Style.marginXS
 
-                          NIconButton {
+                          PanelActionIconButton {
                             readonly property bool multipleDevices: KDEConnect.devices.length > 1
                             icon: "swipe"
                             tooltipText: multipleDevices ? pluginApi?.tr("panel.other-devices") : ""
-                            baseSize: Style.baseWidgetSize * 0.8
-                            colorBg: "#211814"
-                            colorFg: "#f4ae89"
-                            colorBgHover: "#3a261f"
-                            colorFgHover: "#fff4ed"
-                            colorBorder: "#6c4c3e"
-                            colorBorderHover: "#f4ae89"
                             onClicked: {
                               deviceSwitcherOpen = !deviceSwitcherOpen
                             }
@@ -1946,88 +2111,46 @@ Item {
                             opacity: multipleDevices ? 1.0 : 0.0
                           }
 
-                          NIconButton {
+                          PanelActionIconButton {
                             icon: "zoom-in"
                             tooltipText: root.trSafe("panel.phone-size.tooltip", "Phone size: ")
                               + root.phoneSizeLabel + " (" + root.phoneSizePercent + "%)"
-                            baseSize: Style.baseWidgetSize * 0.8
-                            colorBg: "#211814"
-                            colorFg: "#f4ae89"
-                            colorBgHover: "#3a261f"
-                            colorFgHover: "#fff4ed"
-                            colorBorder: "#6c4c3e"
-                            colorBorderHover: "#f4ae89"
                             onClicked: root.cyclePhoneSizePreset()
                           }
 
-                          NIconButton {
+                          PanelActionIconButton {
                             visible: root.embeddedMirrorModeEnabled()
                             icon: root.embeddedMirrorAudioEnabled ? "volume" : "volume-off"
                             tooltipText: root.embeddedMirrorAudioEnabled
                               ? root.trSafe("panel.embedded-mirror.audio-disable", "Disable embedded audio")
                               : root.trSafe("panel.embedded-mirror.audio-enable", "Enable embedded audio")
-                            baseSize: Style.baseWidgetSize * 0.8
-                            colorBg: "#211814"
-                            colorFg: "#f4ae89"
-                            colorBgHover: "#3a261f"
-                            colorFgHover: "#fff4ed"
-                            colorBorder: "#6c4c3e"
-                            colorBorderHover: "#f4ae89"
                             enabled: !KDEConnect.scrcpyLaunching
                             onClicked: root.toggleEmbeddedMirrorAudioMode()
                           }
 
-                          NIconButton {
+                          PanelActionIconButton {
                             icon: "wifi"
                             tooltipText: KDEConnect.wirelessAdbBusy
                               ? root.trSafe("panel.wireless-adb.busy-tooltip", "Wireless ADB command is running")
                               : root.trSafe("panel.wireless-adb.tooltip", "Open Wireless ADB tools")
-                            baseSize: Style.baseWidgetSize * 0.8
-                            colorBg: "#211814"
-                            colorFg: "#f4ae89"
-                            colorBgHover: "#3a261f"
-                            colorFgHover: "#fff4ed"
-                            colorBorder: "#6c4c3e"
-                            colorBorderHover: "#f4ae89"
                             onClicked: root.openWirelessAdbDialog()
                           }
 
-                          NIconButton {
+                          PanelActionIconButton {
                             icon: "device-mobile-search"
                             tooltipText: pluginApi?.tr("panel.browse-device")
-                            baseSize: Style.baseWidgetSize * 0.8
-                            colorBg: "#211814"
-                            colorFg: "#f4ae89"
-                            colorBgHover: "#3a261f"
-                            colorFgHover: "#fff4ed"
-                            colorBorder: "#6c4c3e"
-                            colorBorderHover: "#f4ae89"
                             onClicked: KDEConnect.browseFiles(KDEConnect.mainDevice.id)
                           }
 
-                          NIconButton {
+                          PanelActionIconButton {
                             icon: "device-mobile-share"
                             tooltipText: pluginApi?.tr("panel.send-file")
-                            baseSize: Style.baseWidgetSize * 0.8
-                            colorBg: "#211814"
-                            colorFg: "#f4ae89"
-                            colorBgHover: "#3a261f"
-                            colorFgHover: "#fff4ed"
-                            colorBorder: "#6c4c3e"
-                            colorBorderHover: "#f4ae89"
                             onClicked: shareFilePicker.open()
                           }
 
-                          NIconButton {
+                          PanelActionIconButton {
                             icon: "radar"
                             tooltipText: pluginApi?.tr("panel.find-device")
-                            baseSize: Style.baseWidgetSize * 0.8
-                            colorBg: "#211814"
-                            colorFg: "#f4ae89"
-                            colorBgHover: "#3a261f"
-                            colorFgHover: "#fff4ed"
-                            colorBorder: "#6c4c3e"
-                            colorBorderHover: "#f4ae89"
                             onClicked: KDEConnect.triggerFindMyPhone(KDEConnect.mainDevice.id)
                           }
                         }
@@ -2105,6 +2228,7 @@ Item {
                           onTextRequested: text => root.sendKeyboardText(text)
                           onKeyRequested: keyCode => root.sendKeyboardKey(keyCode)
                           onHomeRequested: root.sendAndroidHomeOrUnlock()
+                          onRecentsRequested: root.sendAndroidNavKey(187)
                         }
                       }
 
@@ -2122,6 +2246,7 @@ Item {
                           circular: true
                           iconName: "arrow-back"
                           label: root.trSafe("panel.embedded-mirror.nav-back", "Back")
+                          tooltipText: root.trSafe("panel.embedded-mirror.nav-back-tooltip", "Back, mouse right click")
                           actionEnabled: root.embeddedMirrorInputActive()
                           onPressed: root.sendAndroidNavKey(4)
                         }
@@ -2132,6 +2257,7 @@ Item {
                           circular: true
                           iconName: "home"
                           label: root.trSafe("panel.embedded-mirror.nav-home", "Home")
+                          tooltipText: root.trSafe("panel.embedded-mirror.nav-home-tooltip", "Home, Home key")
                           actionEnabled: root.embeddedMirrorInputActive()
                           onPressed: root.sendAndroidNavKey(3)
                         }
@@ -2142,29 +2268,9 @@ Item {
                           circular: true
                           iconName: "layout-grid"
                           label: root.trSafe("panel.embedded-mirror.nav-recents", "Recents")
+                          tooltipText: root.trSafe("panel.embedded-mirror.nav-recents-tooltip", "Task picker, mouse wheel press")
                           actionEnabled: root.embeddedMirrorInputActive()
                           onPressed: root.sendAndroidNavKey(187)
-                        }
-
-                        Item { Layout.fillWidth: true }
-
-                        NavActionButton {
-                          circular: true
-                          iconName: "moon"
-                          label: root.trSafe("panel.embedded-mirror.screen-off", "Screen Off")
-                          actionEnabled: root.embeddedMirrorInputActive()
-                          onPressed: root.turnPhysicalScreenOff()
-                        }
-
-                        Item { Layout.fillWidth: true }
-
-                        NavActionButton {
-                          circular: true
-                          iconName: root.keepScreenOnEnabled ? "sun-dim" : "sun"
-                          label: root.trSafe("panel.embedded-mirror.keep-screen-on", "Keep Screen On")
-                          actionEnabled: root.embeddedMirrorInputActive() || root.keepScreenOnEnabled
-                          active: root.keepScreenOnEnabled
-                          onPressed: root.toggleKeepScreenOnWhilePanelOpen()
                         }
 
                         Item { Layout.fillWidth: true }
@@ -2191,7 +2297,7 @@ Item {
                           NIcon {
                             icon: deviceData.getBatteryIcon(root.effectiveBatteryValue(KDEConnect.mainDevice), root.effectiveChargingValue(KDEConnect.mainDevice))
                             pointSize: Style.fontSizeXL * 1.2075
-                            color: "#f4e3b6"
+                            color: root.shellPrimaryIconColor
                             Layout.alignment: Qt.AlignTop
                             Layout.preferredWidth: 38 * Style.uiScaleRatio
                           }
@@ -2203,7 +2309,7 @@ Item {
                             NText {
                               text: pluginApi?.tr("panel.card.battery") || "Battery"
                               pointSize: Style.fontSizeS * 1.15
-                              color: "#c9b79b"
+                              color: root.shellSecondaryTextColor
                             }
 
                             NText {
@@ -2212,7 +2318,7 @@ Item {
                                 : (root.effectiveBatteryValue(KDEConnect.mainDevice) + "%")
                               pointSize: Style.fontSizeL * 1.288
                               font.weight: Style.fontWeightBold
-                              color: "#fff5ef"
+                              color: root.shellPrimaryTextColor
                             }
                           }
                         }
@@ -2224,7 +2330,7 @@ Item {
                           NIcon {
                             icon: deviceData.getCellularTypeIcon(root.effectiveNetworkType(KDEConnect.mainDevice))
                             pointSize: Style.fontSizeXL * 1.2075
-                            color: "#f4e3b6"
+                            color: root.shellPrimaryIconColor
                             Layout.alignment: Qt.AlignTop
                             Layout.preferredWidth: 38 * Style.uiScaleRatio
                           }
@@ -2236,14 +2342,14 @@ Item {
                             NText {
                               text: pluginApi?.tr("panel.card.network") || "Network"
                               pointSize: Style.fontSizeS * 1.15
-                              color: "#c9b79b"
+                              color: root.shellSecondaryTextColor
                             }
 
                             NText {
                               text: root.effectiveNetworkType(KDEConnect.mainDevice) || (pluginApi?.tr("panel.unknown") || "Unknown")
                               pointSize: Style.fontSizeL * 1.288
                               font.weight: Style.fontWeightBold
-                              color: "#fff5ef"
+                              color: root.shellPrimaryTextColor
                             }
                           }
                         }
@@ -2255,7 +2361,7 @@ Item {
                           NIcon {
                             icon: deviceData.getCellularStrengthIcon(root.effectiveSignalStrength(KDEConnect.mainDevice))
                             pointSize: Style.fontSizeXL * 1.2075
-                            color: "#f4e3b6"
+                            color: root.shellPrimaryIconColor
                             Layout.alignment: Qt.AlignTop
                             Layout.preferredWidth: 38 * Style.uiScaleRatio
                           }
@@ -2267,7 +2373,7 @@ Item {
                             NText {
                               text: root.trSafe("panel.card.signal", "Signal")
                               pointSize: Style.fontSizeS * 1.15
-                              color: "#c9b79b"
+                              color: root.shellSecondaryTextColor
                             }
 
                             NText {
@@ -2275,8 +2381,54 @@ Item {
                                 || (pluginApi?.tr("panel.unknown") || "Unknown")
                               pointSize: Style.fontSizeL * 1.288
                               font.weight: Style.fontWeightBold
-                              color: "#fff5ef"
+                              color: root.shellPrimaryTextColor
                             }
+                          }
+                        }
+
+                        UtilityActionCard {
+                          id: mirrorUtilityCard
+                          visible: root.embeddedMirrorModeEnabled()
+
+                          PanelActionIconButton {
+                            Layout.alignment: Qt.AlignHCenter
+                            icon: "camera"
+                            tooltipText: root.trSafe("panel.embedded-mirror.screenshot", "Take Screenshot")
+                            enabled: root.embeddedMirrorInputActive() && !KDEConnect.adbScreenshotBusy
+                            onClicked: root.takeMirrorScreenshot()
+                          }
+
+                          PanelActionIconButton {
+                            Layout.alignment: Qt.AlignHCenter
+                            icon: "video"
+                            tooltipText: KDEConnect.adbScreenRecordingActive
+                              ? root.trSafe("panel.embedded-mirror.record-stop", "Stop Recording")
+                              : root.trSafe("panel.embedded-mirror.record-start", "Start Recording")
+                            enabled: KDEConnect.adbScreenRecordingActive
+                              || (root.embeddedMirrorInputActive() && !KDEConnect.adbScreenRecordingBusy)
+                            active: KDEConnect.adbScreenRecordingActive
+                            onClicked: root.toggleMirrorScreenRecording()
+                          }
+
+                          PanelActionIconButton {
+                            Layout.alignment: Qt.AlignHCenter
+                            icon: "moon"
+                            tooltipText: root.trSafe("panel.embedded-mirror.keep-screen-on", "Keep Screen Awake")
+                            enabled: (root.embeddedMirrorInputActive() && !root.keepScreenOnPending)
+                              || root.keepScreenOnEnabled
+                            active: root.keepScreenOnEnabled || root.keepScreenOnPending
+                            onClicked: root.toggleKeepScreenOnWhilePanelOpen()
+                          }
+
+                          PanelActionIconButton {
+                            Layout.alignment: Qt.AlignHCenter
+                            icon: root.dimScreenEnabled ? "sun-dim" : "sun"
+                            tooltipText: root.dimScreenEnabled
+                              ? root.trSafe("panel.embedded-mirror.screen-restore", "Restore Screen Brightness")
+                              : root.trSafe("panel.embedded-mirror.screen-dim", "Set Screen to Minimum Brightness")
+                            enabled: root.embeddedMirrorInputActive() || root.dimScreenEnabled
+                            active: root.dimScreenEnabled || root.dimScreenPending
+                            onClicked: root.toggleMirrorScreenDim()
                           }
                         }
 
@@ -2293,6 +2445,9 @@ Item {
                             phonePreviewContainer.height
                               - rightInfoColumn.Layout.topMargin
                               - deviceSummaryColumn.implicitHeight
+                              - (mirrorUtilityCard.visible
+                                  ? (mirrorUtilityCard.implicitHeight + rightInfoColumn.spacing)
+                                  : 0)
                               - rightInfoColumn.spacing
                           )
                         )
@@ -2304,9 +2459,9 @@ Item {
                           root.phoneSizeValue(104, 118, 132) * Style.uiScaleRatio
                         )
                         radius: 18 * Style.uiScaleRatio
-                        color: "#211814"
+                        color: root.shellCardColor
                         border.width: Style.borderS
-                        border.color: "#6c4c3e"
+                        border.color: root.shellCardBorderColor
                         clip: true
 
                         ColumnLayout {
@@ -2320,7 +2475,7 @@ Item {
                             text: root.embeddedMirrorDrawerStatusTitle(phonePreview)
                             pointSize: Style.fontSizeS * root.phoneSizeValue(1.02, 1.1, 1.1)
                             font.weight: Style.fontWeightBold
-                            color: "#fff4ed"
+                            color: root.shellPrimaryTextColor
                             visible: text !== ""
                             wrapMode: Text.WordWrap
                             maximumLineCount: 2
@@ -2331,7 +2486,7 @@ Item {
                             Layout.fillWidth: true
                             text: root.embeddedMirrorDrawerStatusSubtitle(phonePreview)
                             pointSize: Style.fontSizeXS * root.phoneSizeValue(1.0, 1.06, 1.06)
-                            color: "#d9c8bb"
+                            color: root.shellSecondaryTextColor
                             visible: text !== ""
                             wrapMode: Text.WordWrap
                           }
@@ -2339,10 +2494,10 @@ Item {
                           Rectangle {
                             Layout.fillWidth: true
                             visible: root.setupRequiredLoopbackCommandVisible()
-                            color: "#2b211d"
+                            color: root.shellNestedCardColor
                             radius: 14 * Style.uiScaleRatio
                             border.width: Style.borderS
-                            border.color: "#7d5b4e"
+                            border.color: root.shellNestedCardBorderColor
                             implicitHeight: drawerLoopbackCommandColumn.implicitHeight + (Style.marginM * 1.2)
 
                             ColumnLayout {
@@ -2358,14 +2513,14 @@ Item {
                                 NIcon {
                                   icon: "copy"
                                   pointSize: Style.fontSizeM
-                                  color: "#f4d0be"
+                                  color: root.shellAccentIconColor
                                 }
 
                                 NText {
                                   Layout.fillWidth: true
                                   text: root.trSafe("panel.setup-required.command-label", "Click to copy the loopback setup command")
                                   pointSize: Style.fontSizeS
-                                  color: "#f0d8ca"
+                                  color: root.shellAccentTextColor
                                   wrapMode: Text.WordWrap
                                 }
                               }
@@ -2374,7 +2529,7 @@ Item {
                                 Layout.fillWidth: true
                                 text: root.embeddedMirrorLoopbackSetupCommand
                                 pointSize: Style.fontSizeXS
-                                color: "#fff4ed"
+                                color: root.shellPrimaryTextColor
                                 wrapMode: Text.WrapAnywhere
                                 font.family: "monospace"
                               }
@@ -2421,7 +2576,7 @@ Item {
           Layout.fillWidth: true
           Layout.fillHeight: true
           Layout.minimumHeight: implicitHeight
-          color: "#1c1517"
+          color: root.shellStageColor
           radius: 24 * Style.uiScaleRatio
           implicitHeight: noDevicePairedContent.implicitHeight + (Style.marginL * 2.4)
 
@@ -2439,7 +2594,7 @@ Item {
                 text: KDEConnect.mainDevice?.name || root.trSafe("panel.unknown", "Unknown")
                 pointSize: Style.fontSizeXXL
                 font.weight: Style.fontWeightBold
-                color: "#fff4ed"
+                color: root.shellPrimaryTextColor
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
               }
@@ -2449,10 +2604,10 @@ Item {
               Layout.fillWidth: true
               Layout.fillHeight: true
               Layout.minimumHeight: pairStateColumn.implicitHeight + (Style.marginL * 1.8)
-              color: "#241b1d"
+              color: root.shellCardColor
               radius: 20 * Style.uiScaleRatio
               border.width: Style.borderS
-              border.color: "#6c4c3e"
+              border.color: root.shellCardBorderColor
 
               ColumnLayout {
                 id: pairStateColumn
@@ -2473,15 +2628,15 @@ Item {
                       width: 48 * Style.uiScaleRatio
                       height: width
                       radius: width / 2
-                      color: KDEConnect.mainDevice.pairRequested ? "#3a261f" : "#2f231c"
+                      color: KDEConnect.mainDevice.pairRequested ? root.shellAccentCardColor : root.shellIconChipColor
                       border.width: Style.borderS
-                      border.color: KDEConnect.mainDevice.pairRequested ? "#f4ae89" : "#6c4c3e"
+                      border.color: KDEConnect.mainDevice.pairRequested ? root.shellAccentCardBorderColor : root.shellIconChipBorderColor
 
                       NIcon {
                         anchors.centerIn: parent
                         icon: KDEConnect.mainDevice.pairRequested ? "key" : "device-mobile"
                         pointSize: Style.fontSizeXL
-                        color: KDEConnect.mainDevice.pairRequested ? "#ffd7c3" : "#f4ae89"
+                        color: KDEConnect.mainDevice.pairRequested ? root.shellAccentIconColor : root.shellIconChipFgColor
                       }
                     }
 
@@ -2494,7 +2649,7 @@ Item {
                           : root.trSafe("panel.pair-needed-title", "Pairing Needed")
                         pointSize: Style.fontSizeL * 1.06
                         font.weight: Style.fontWeightBold
-                        color: "#fff4ed"
+                        color: root.shellPrimaryTextColor
                       }
 
                       NText {
@@ -2502,7 +2657,7 @@ Item {
                           ? root.trSafe("panel.pair-requested-subtitle", "Approve the request on the phone to restore controls.")
                           : root.trSafe("panel.pair-needed-subtitle", "KDE Connect reported this device as temporarily unpaired.")
                         pointSize: Style.fontSizeS * 1.02
-                        color: "#cdb7ab"
+                        color: root.shellSecondaryTextColor
                       }
                     }
                   }
@@ -2513,7 +2668,7 @@ Item {
                   text: KDEConnect.mainDevice.pairRequested
                     ? root.trSafe("panel.pair-requested", "Confirm the pairing request on the phone. The mirror and device actions will come back automatically after approval.")
                     : root.trSafe("panel.pair-description", "This device is temporarily reported as unpaired. Retry pairing here if KDE Connect did not recover on its own after reconnecting.")
-                  color: "#d9c8bb"
+                  color: root.shellSecondaryTextColor
                   horizontalAlignment: Text.AlignHCenter
                   wrapMode: Text.WordWrap
                 }
@@ -2534,10 +2689,10 @@ Item {
                 Rectangle {
                   Layout.alignment: Qt.AlignHCenter
                   visible: KDEConnect.mainDevice.pairRequested && String(KDEConnect.mainDevice.verificationKey || "").trim() !== ""
-                  color: "#2e2220"
+                  color: root.shellAccentCardColor
                   radius: 14 * Style.uiScaleRatio
                   border.width: Style.borderS
-                  border.color: "#7d5b4e"
+                  border.color: root.shellAccentCardBorderColor
                   implicitWidth: verificationRow.implicitWidth + (Style.marginM * 1.4)
                   implicitHeight: verificationRow.implicitHeight + (Style.marginS * 1.4)
 
@@ -2549,14 +2704,14 @@ Item {
                     NIcon {
                       icon: "key"
                       pointSize: Style.fontSizeL
-                      color: "#f4d0be"
+                      color: root.shellAccentIconColor
                     }
 
                     NText {
                       text: KDEConnect.mainDevice.verificationKey
                       pointSize: Style.fontSizeL
                       font.weight: Style.fontWeightBold
-                      color: "#fff4ed"
+                      color: root.shellAccentTextColor
                     }
                   }
                 }
@@ -2573,7 +2728,7 @@ Item {
                   visible: KDEConnect.mainDevice.pairRequested
                   text: root.trSafe("panel.pair-waiting", "Waiting for the phone to accept the pairing request.")
                   pointSize: Style.fontSizeS
-                  color: "#bda99e"
+                  color: root.shellSecondaryTextColor
                   horizontalAlignment: Text.AlignHCenter
                   wrapMode: Text.WordWrap
                 }
@@ -2594,7 +2749,7 @@ Item {
           Layout.fillWidth: true
           Layout.fillHeight: true
           Layout.minimumHeight: implicitHeight
-          color: "#1c1517"
+          color: root.shellStageColor
           radius: 24 * Style.uiScaleRatio
           implicitHeight: setupRequiredContent.implicitHeight + (Style.marginL * 2.4)
 
@@ -2610,7 +2765,7 @@ Item {
               text: root.trSafe("panel.setup-required.phone-name", "Android Phone")
               pointSize: Style.fontSizeXXL
               font.weight: Style.fontWeightBold
-              color: "#fff4ed"
+              color: root.shellPrimaryTextColor
               Layout.fillWidth: true
               horizontalAlignment: Text.AlignHCenter
             }
@@ -2619,10 +2774,10 @@ Item {
               Layout.fillWidth: true
               Layout.fillHeight: true
               Layout.minimumHeight: setupRequiredColumn.implicitHeight + (Style.marginL * 1.8)
-              color: "#241b1d"
+              color: root.shellCardColor
               radius: 20 * Style.uiScaleRatio
               border.width: Style.borderS
-              border.color: "#6c4c3e"
+              border.color: root.shellCardBorderColor
 
               ColumnLayout {
                 id: setupRequiredColumn
@@ -2643,15 +2798,15 @@ Item {
                       width: 48 * Style.uiScaleRatio
                       height: width
                       radius: width / 2
-                      color: "#2f231c"
+                      color: root.shellIconChipColor
                       border.width: Style.borderS
-                      border.color: "#6c4c3e"
+                      border.color: root.shellIconChipBorderColor
 
                       NIcon {
                         anchors.centerIn: parent
                         icon: "device-mobile-off"
                         pointSize: Style.fontSizeXL
-                        color: "#f4ae89"
+                        color: root.shellIconChipFgColor
                       }
                     }
 
@@ -2662,13 +2817,13 @@ Item {
                         text: root.trSafe("panel.setup-required.title", "Finish Setup to Connect")
                         pointSize: Style.fontSizeL * 1.06
                         font.weight: Style.fontWeightBold
-                        color: "#fff4ed"
+                        color: root.shellPrimaryTextColor
                       }
 
                       NText {
                         text: root.trSafe("panel.setup-required.subtitle", "Link the phone first, then the mirror controls and status will appear here.")
                         pointSize: Style.fontSizeS * 1.02
-                        color: "#cdb7ab"
+                        color: root.shellSecondaryTextColor
                         wrapMode: Text.WordWrap
                       }
                     }
@@ -2678,7 +2833,7 @@ Item {
                 NText {
                   Layout.fillWidth: true
                   text: root.setupRequiredPairingStepText()
-                  color: "#d9c8bb"
+                  color: root.shellSecondaryTextColor
                   horizontalAlignment: Text.AlignHCenter
                   wrapMode: Text.WordWrap
                 }
@@ -2686,7 +2841,7 @@ Item {
                 NText {
                   Layout.fillWidth: true
                   text: root.setupRequiredAdbStepText()
-                  color: "#d9c8bb"
+                  color: root.shellSecondaryTextColor
                   horizontalAlignment: Text.AlignHCenter
                   wrapMode: Text.WordWrap
                 }
@@ -2694,7 +2849,7 @@ Item {
                 NText {
                   Layout.fillWidth: true
                   text: root.setupRequiredLoopbackStepText()
-                  color: "#d9c8bb"
+                  color: root.shellSecondaryTextColor
                   horizontalAlignment: Text.AlignHCenter
                   wrapMode: Text.WordWrap
                 }
@@ -2712,10 +2867,10 @@ Item {
                 Rectangle {
                   Layout.alignment: Qt.AlignHCenter
                   visible: root.mainDevicePairingInProgress() && String(KDEConnect.mainDevice?.verificationKey || "").trim() !== ""
-                  color: "#2e2220"
+                  color: root.shellAccentCardColor
                   radius: 14 * Style.uiScaleRatio
                   border.width: Style.borderS
-                  border.color: "#7d5b4e"
+                  border.color: root.shellAccentCardBorderColor
                   implicitWidth: setupVerificationRow.implicitWidth + (Style.marginM * 1.4)
                   implicitHeight: setupVerificationRow.implicitHeight + (Style.marginS * 1.4)
 
@@ -2727,14 +2882,14 @@ Item {
                     NIcon {
                       icon: "key"
                       pointSize: Style.fontSizeL
-                      color: "#f4d0be"
+                      color: root.shellAccentIconColor
                     }
 
                     NText {
                       text: KDEConnect.mainDevice?.verificationKey || ""
                       pointSize: Style.fontSizeL
                       font.weight: Style.fontWeightBold
-                      color: "#fff4ed"
+                      color: root.shellAccentTextColor
                     }
                   }
                 }
@@ -2750,7 +2905,7 @@ Item {
                   Layout.fillWidth: true
                   visible: root.mainDevicePairingInProgress()
                   text: root.trSafe("panel.setup-required.pair-waiting", "Approve the KDE Connect pairing request on the phone to continue.")
-                  color: "#d9c8bb"
+                  color: root.shellSecondaryTextColor
                   horizontalAlignment: Text.AlignHCenter
                   wrapMode: Text.WordWrap
                 }
@@ -2759,10 +2914,10 @@ Item {
                   Layout.alignment: Qt.AlignHCenter
                   Layout.fillWidth: true
                   visible: root.setupRequiredLoopbackCommandVisible()
-                  color: "#2b211d"
+                  color: root.shellNestedCardColor
                   radius: 14 * Style.uiScaleRatio
                   border.width: Style.borderS
-                  border.color: "#7d5b4e"
+                  border.color: root.shellNestedCardBorderColor
                   implicitHeight: loopbackCommandColumn.implicitHeight + (Style.marginM * 1.2)
 
                   ColumnLayout {
@@ -2778,14 +2933,14 @@ Item {
                       NIcon {
                         icon: "copy"
                         pointSize: Style.fontSizeM
-                        color: "#f4d0be"
+                        color: root.shellAccentIconColor
                       }
 
                       NText {
                         Layout.fillWidth: true
                         text: root.trSafe("panel.setup-required.command-label", "Click to copy the loopback setup command")
                         pointSize: Style.fontSizeS
-                        color: "#f0d8ca"
+                        color: root.shellAccentTextColor
                         wrapMode: Text.WordWrap
                       }
                     }
@@ -2794,7 +2949,7 @@ Item {
                       Layout.fillWidth: true
                       text: root.embeddedMirrorLoopbackSetupCommand
                       pointSize: Style.fontSizeXS
-                      color: "#fff4ed"
+                      color: root.shellPrimaryTextColor
                       wrapMode: Text.WrapAnywhere
                       font.family: "monospace"
                     }
@@ -3134,7 +3289,7 @@ Item {
                 Layout.preferredWidth: 176 * Style.uiScaleRatio
                 Layout.preferredHeight: 176 * Style.uiScaleRatio
                 radius: Style.radiusM
-                color: "#ffffff"
+                color: Color.mSurface
                 border.color: Qt.rgba(Color.mOutline.r, Color.mOutline.g, Color.mOutline.b, 0.5)
                 border.width: Style.borderS
 
@@ -3152,7 +3307,7 @@ Item {
                   width: parent.width - (Style.marginM * 2)
                   text: root.trSafe("panel.wireless-adb.qr-placeholder", "Tap Start QR to generate a pairing code.")
                   visible: root.wirelessAdbQrImageSource() === ""
-                  color: "#4b5563"
+                  color: Color.mOnSurfaceVariant
                   horizontalAlignment: Text.AlignHCenter
                   wrapMode: Text.WordWrap
                 }
