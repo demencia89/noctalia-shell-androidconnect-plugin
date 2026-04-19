@@ -73,6 +73,11 @@ Item {
   property bool panelOpenUnlockPending: false
   property int panelOpenUnlockRetriesRemaining: 0
   readonly property int panelStatusGraceMs: 5000
+  property bool keepScreenOnPending: false
+  property bool keepScreenOnEnabled: false
+  property string keepScreenOnSerial: ""
+  property string keepScreenOnOriginalTimeout: ""
+  readonly property int keepScreenOnTimeoutMs: 2147483647
 
   anchors.fill: parent
 
@@ -313,9 +318,26 @@ Item {
 
       panelOpenUnlockTimer.restart();
     }
+
+    function onAdbScreenTimeoutRead(serial, value, success) {
+      if (!root.keepScreenOnPending)
+        return;
+
+      if (String(serial || "").trim() !== root.keepScreenOnSerial)
+        return;
+
+      root.keepScreenOnPending = false;
+      if (!success)
+        return;
+
+      root.keepScreenOnEnabled = true;
+      root.keepScreenOnOriginalTimeout = String(value || "").trim();
+      KDEConnect.setAdbScreenTimeout(root.keepScreenOnSerial, String(root.keepScreenOnTimeoutMs));
+    }
   }
 
   Component.onDestruction: {
+    root.restoreKeepScreenOnState();
     KDEConnect.reduceBackgroundRefresh = false;
     embeddedMirrorAutoStartTimer.stop();
     panelOpenUnlockTimer.stop();
@@ -343,6 +365,7 @@ Item {
       root.scheduleEmbeddedMirrorAutoStart();
     }
     if (!visible) {
+      root.restoreKeepScreenOnState();
       root.panelVisibleSinceMs = 0;
       root.panelStatusGraceElapsed = true;
       embeddedMirrorAutoStartTimer.stop();
@@ -1543,12 +1566,54 @@ Item {
       KDEConnect.runAdbKeyevent(serial, 82); // MENU / dismiss keyguard
   }
 
+  function turnPhysicalScreenOff() {
+    if (!embeddedMirrorInputActive())
+      return;
+
+    KDEConnect.runAdbKeyevent(currentMirrorAdbSerial(), 223); // SLEEP
+  }
+
+  function toggleKeepScreenOnWhilePanelOpen() {
+    const serial = String(keepScreenOnSerial || currentMirrorAdbSerial() || "").trim();
+    if (serial === "")
+      return;
+
+    if (keepScreenOnEnabled) {
+      restoreKeepScreenOnState();
+      return;
+    }
+
+    keepScreenOnSerial = serial;
+    if (KDEConnect.hasFreshAdbScreenTimeout(serial)) {
+      keepScreenOnPending = false;
+      keepScreenOnEnabled = true;
+      keepScreenOnOriginalTimeout = String(KDEConnect.adbScreenTimeoutValue || "").trim();
+      KDEConnect.setAdbScreenTimeout(serial, String(keepScreenOnTimeoutMs));
+      return;
+    }
+
+    keepScreenOnPending = true;
+    KDEConnect.queryAdbScreenTimeout(serial);
+  }
+
+  function restoreKeepScreenOnState() {
+    const serial = String(keepScreenOnSerial || "").trim();
+    keepScreenOnPending = false;
+    if (serial !== "" && keepScreenOnEnabled)
+      KDEConnect.restoreAdbScreenTimeout(serial, keepScreenOnOriginalTimeout);
+
+    keepScreenOnEnabled = false;
+    keepScreenOnSerial = "";
+    keepScreenOnOriginalTimeout = "";
+  }
+
   component NavActionButton: Rectangle {
     id: navButton
 
     property string iconName: ""
     property string label: ""
     property bool actionEnabled: true
+    property bool active: false
     property bool circular: false
     property real sizeScale: root.navButtonScaleFactor
     property real circularSize: 46 * Style.uiScaleRatio * sizeScale
@@ -1567,20 +1632,28 @@ Item {
           : (navMouse.containsMouse ? 1.08 : 1.0))
       : 1.0
     color: circular
-      ? (navMouse.containsMouse
-          ? Color.mHover
-          : Color.mSurfaceVariant)
-      : (navMouse.containsMouse
-          ? Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.96)
-          : Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.82))
+      ? (navButton.active
+          ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.18)
+          : (navMouse.containsMouse
+              ? Color.mHover
+              : Color.mSurfaceVariant))
+      : (navButton.active
+          ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.16)
+          : (navMouse.containsMouse
+              ? Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.96)
+              : Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.82)))
     border.width: Style.borderS
     border.color: circular
-      ? (navMouse.containsMouse
-          ? Color.mOutline
-          : Color.mOutline)
-      : (navMouse.containsMouse
-          ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.32)
-          : Qt.rgba(Color.mOutline.r, Color.mOutline.g, Color.mOutline.b, 0.22))
+      ? (navButton.active
+          ? Color.mPrimary
+          : (navMouse.containsMouse
+              ? Color.mOutline
+              : Color.mOutline))
+      : (navButton.active
+          ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.52)
+          : (navMouse.containsMouse
+              ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.32)
+              : Qt.rgba(Color.mOutline.r, Color.mOutline.g, Color.mOutline.b, 0.22)))
     opacity: actionEnabled ? 1.0 : 0.55
 
     Behavior on color {
@@ -1612,9 +1685,11 @@ Item {
         icon: navButton.iconName
         pointSize: (navButton.circular ? Style.fontSizeS : Style.fontSizeXS) * navButton.sizeScale
         color: navButton.actionEnabled
-          ? (navButton.circular
-              ? (navMouse.containsMouse ? Color.mOnHover : Color.mPrimary)
-              : Color.mOnSurface)
+          ? (navButton.active
+              ? Color.mPrimary
+              : (navButton.circular
+                  ? (navMouse.containsMouse ? Color.mOnHover : Color.mPrimary)
+                  : Color.mOnSurface))
           : Color.mOnSurfaceVariant
       }
 
@@ -2069,6 +2144,27 @@ Item {
                           label: root.trSafe("panel.embedded-mirror.nav-recents", "Recents")
                           actionEnabled: root.embeddedMirrorInputActive()
                           onPressed: root.sendAndroidNavKey(187)
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        NavActionButton {
+                          circular: true
+                          iconName: "moon"
+                          label: root.trSafe("panel.embedded-mirror.screen-off", "Screen Off")
+                          actionEnabled: root.embeddedMirrorInputActive()
+                          onPressed: root.turnPhysicalScreenOff()
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        NavActionButton {
+                          circular: true
+                          iconName: root.keepScreenOnEnabled ? "sun-dim" : "sun"
+                          label: root.trSafe("panel.embedded-mirror.keep-screen-on", "Keep Screen On")
+                          actionEnabled: root.embeddedMirrorInputActive() || root.keepScreenOnEnabled
+                          active: root.keepScreenOnEnabled
+                          onPressed: root.toggleKeepScreenOnWhilePanelOpen()
                         }
 
                         Item { Layout.fillWidth: true }

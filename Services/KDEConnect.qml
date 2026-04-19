@@ -57,6 +57,11 @@ QtObject {
   property string adbScreenLockState: "unknown"
   property bool adbScreenInteractive: false
   property bool adbUnlockNeeded: true
+  property string adbScreenTimeoutSerial: ""
+  property string adbScreenTimeoutKnownSerial: ""
+  property string adbScreenTimeoutRaw: ""
+  property string adbScreenTimeoutError: ""
+  property string adbScreenTimeoutValue: ""
   property string adbQueuedSerial: ""
   property var adbQueuedArgs: []
   property string adbQueuedKind: ""
@@ -72,6 +77,7 @@ QtObject {
   signal wirelessAdbFinished(bool success, string message)
   signal adbDevicesRefreshed()
   signal adbScreenStateRefreshed(string serial, bool unlockNeeded, bool interactive, string lockState)
+  signal adbScreenTimeoutRead(string serial, string value, bool success)
 
   onDevicesChanged: {
     setMainDevice(root.mainDeviceId)
@@ -740,6 +746,13 @@ QtObject {
       && adbScreenStateError === "";
   }
 
+  function hasFreshAdbScreenTimeout(serial: string): bool {
+    const trimmedSerial = String(serial || "").trim();
+    return trimmedSerial !== ""
+      && adbScreenTimeoutKnownSerial === trimmedSerial
+      && adbScreenTimeoutError === "";
+  }
+
   function queryAdbScreenState(serial: string): bool {
     const trimmedSerial = String(serial || "").trim();
     if (trimmedSerial === ""
@@ -765,6 +778,60 @@ QtObject {
       + "; unlockNeeded=false"
       + "; if [ \"$locked\" = true ]; then unlockNeeded=true; fi"
       + "; printf 'interactive=%s\\nlocked=%s\\nunlockNeeded=%s\\n' \"$interactive\" \"$locked\" \"$unlockNeeded\""
+    ]);
+  }
+
+  function queryAdbScreenTimeout(serial: string): bool {
+    const trimmedSerial = String(serial || "").trim();
+    if (trimmedSerial === ""
+        || adbScreenTimeoutSerial !== ""
+        || hasQueuedAdbTask("screen-timeout", trimmedSerial))
+      return false;
+
+    adbScreenTimeoutSerial = trimmedSerial;
+    adbScreenTimeoutKnownSerial = "";
+    adbScreenTimeoutRaw = "";
+    adbScreenTimeoutError = "";
+    adbScreenTimeoutValue = "";
+    return queueAdbTask("screen-timeout", trimmedSerial, [
+      "shell",
+      "sh",
+      "-c",
+      "settings get system screen_off_timeout 2>/dev/null || true"
+    ]);
+  }
+
+  function setAdbScreenTimeout(serial: string, timeoutValue: string): bool {
+    const trimmedSerial = String(serial || "").trim();
+    const trimmedValue = String(timeoutValue || "").trim();
+    if (trimmedSerial === "" || trimmedValue === "")
+      return false;
+
+    return queueAdbTask("screen-timeout-set", trimmedSerial, [
+      "shell",
+      "settings",
+      "put",
+      "system",
+      "screen_off_timeout",
+      trimmedValue
+    ]);
+  }
+
+  function restoreAdbScreenTimeout(serial: string, timeoutValue: string): bool {
+    const trimmedSerial = String(serial || "").trim();
+    const trimmedValue = String(timeoutValue || "").trim();
+    if (trimmedSerial === "")
+      return false;
+
+    if (/^\d+$/.test(trimmedValue))
+      return setAdbScreenTimeout(trimmedSerial, trimmedValue);
+
+    return queueAdbTask("screen-timeout-restore", trimmedSerial, [
+      "shell",
+      "settings",
+      "delete",
+      "system",
+      "screen_off_timeout"
     ]);
   }
 
@@ -1430,6 +1497,26 @@ QtObject {
         }
 
         root.adbScreenStateSerial = "";
+      } else if (commandKind === "screen-timeout") {
+        root.adbScreenTimeoutRaw = stdoutText;
+
+        if (exitCode === 0) {
+          root.adbScreenTimeoutValue = String(stdoutText || "").trim();
+          root.adbScreenTimeoutKnownSerial = commandSerial;
+          root.adbScreenTimeoutError = "";
+          root.adbScreenTimeoutRead(commandSerial, root.adbScreenTimeoutValue, true);
+          Logger.i("KDEConnect", "ADB screen timeout:",
+            "serial=" + commandSerial,
+            "value=" + root.adbScreenTimeoutValue);
+        } else {
+          root.adbScreenTimeoutKnownSerial = "";
+          root.adbScreenTimeoutValue = "";
+          root.adbScreenTimeoutError = stderrText !== "" ? stderrText : ("adb screen timeout exited with code " + exitCode);
+          root.adbScreenTimeoutRead(commandSerial, "", false);
+          Logger.w("KDEConnect", "adb screen timeout failed:", root.adbScreenTimeoutError);
+        }
+
+        root.adbScreenTimeoutSerial = "";
       } else if (exitCode !== 0) {
         Logger.w("KDEConnect", "ADB input command failed:",
           "kind=" + commandKind,
@@ -1552,6 +1639,11 @@ QtObject {
       root.adbScreenLockState = "unknown";
       root.adbScreenInteractive = false;
       root.adbUnlockNeeded = true;
+      root.adbScreenTimeoutSerial = "";
+      root.adbScreenTimeoutKnownSerial = "";
+      root.adbScreenTimeoutRaw = "";
+      root.adbScreenTimeoutError = "";
+      root.adbScreenTimeoutValue = "";
       root.adbDisplayInfoSerial = "";
       root.adbDisplayInfoStdout = "";
       root.adbDisplayInfoStderr = "";
