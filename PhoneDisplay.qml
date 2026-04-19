@@ -47,6 +47,10 @@ Rectangle {
     readonly property real screenInsetTopRatio: 26 / deviceArtHeight
     readonly property real screenInsetBottomRatio: 25 / deviceArtHeight
     readonly property real scaleFactor: Math.min(width / deviceArtWidth, height / deviceArtHeight)
+    readonly property real frameShadowRadius: 34 * phoneRoot.scaleFactor
+    readonly property real statusCardRadius: 14 * phoneRoot.scaleFactor
+    readonly property real statusCardMargin: 10 * phoneRoot.scaleFactor
+    readonly property real statusCardSpacing: 6 * phoneRoot.scaleFactor
     readonly property real contentAspectRatio: {
         if (mirrorContentWidth > 0 && mirrorContentHeight > 0)
             return mirrorContentWidth / mirrorContentHeight;
@@ -624,7 +628,7 @@ Rectangle {
 
     RectangularShadow {
         anchors.fill: phoneRect
-        radius: 34 * phoneRoot.scaleFactor
+        radius: phoneRoot.frameShadowRadius
         blur: 24
         spread: 0.08
         color: phoneRoot.frameShadowColor
@@ -1004,7 +1008,7 @@ Rectangle {
                     anchors.centerIn: parent
                     width: parent.width - (22 * phoneRoot.scaleFactor)
                     implicitHeight: statusContent.implicitHeight + (20 * phoneRoot.scaleFactor)
-                    radius: 14 * phoneRoot.scaleFactor
+                    radius: phoneRoot.statusCardRadius
                     color: phoneRoot.overlayCardColor
                     border.width: Math.max(1, Math.round(1 * phoneRoot.scaleFactor))
                     border.color: phoneRoot.overlayCardBorderColor
@@ -1013,8 +1017,8 @@ Rectangle {
                         id: statusContent
 
                         anchors.fill: parent
-                        anchors.margins: 10 * phoneRoot.scaleFactor
-                        spacing: 6 * phoneRoot.scaleFactor
+                        anchors.margins: phoneRoot.statusCardMargin
+                        spacing: phoneRoot.statusCardSpacing
 
                         BusyIndicator {
                             Layout.alignment: Qt.AlignHCenter

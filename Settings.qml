@@ -17,8 +17,8 @@ ColumnLayout {
 
   NColorChoice {
     Layout.fillWidth: true
-    label: pluginApi?.tr("settings.iconColor.label") || "Widget Icon Color"
-    description: pluginApi?.tr("settings.iconColor.desc") || "Color of the AndroidConnect bar widget icon"
+    label: pluginApi?.tr("settings.iconColor.label")
+    description: pluginApi?.tr("settings.iconColor.desc")
     currentKey: iconColor
     onSelected: key => iconColor = key
   }

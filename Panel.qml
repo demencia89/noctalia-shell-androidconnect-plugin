@@ -112,6 +112,7 @@ Item {
   property string dimScreenOriginalMode: ""
   readonly property int dimScreenBrightnessValue: 0
   property int embeddedMirrorFormatLockRetryCount: 0
+  readonly property int embeddedMirrorWarmStopTimeoutMs: 120000
 
   anchors.fill: parent
 
@@ -165,6 +166,18 @@ Item {
       }
 
       embeddedMirrorFormatLockProc.running = true;
+    }
+  }
+
+  Timer {
+    id: embeddedMirrorWarmStopTimer
+    interval: root.embeddedMirrorWarmStopTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (root.visible)
+        return;
+
+      KDEConnect.forceStopScrcpyProcesses(root.embeddedVideoDevice);
     }
   }
 
@@ -410,6 +423,7 @@ Item {
     root.restoreKeepScreenOnState();
     KDEConnect.reduceBackgroundRefresh = false;
     embeddedMirrorAutoStartTimer.stop();
+    embeddedMirrorWarmStopTimer.stop();
     panelOpenUnlockTimer.stop();
     root.clearPanelOpenUnlockState();
     KDEConnect.forceStopScrcpyProcesses(root.embeddedVideoDevice);
@@ -418,6 +432,7 @@ Item {
   onVisibleChanged: {
     root.syncBackgroundRefreshPolicy();
     if (visible) {
+      embeddedMirrorWarmStopTimer.stop();
       root.panelVisibleSinceMs = Date.now();
       root.panelStatusGraceElapsed = false;
       panelStatusGraceTimer.restart();
@@ -444,9 +459,9 @@ Item {
       panelStatusGraceTimer.stop();
       panelOpenUnlockTimer.stop();
       root.clearPanelOpenUnlockState();
+      if (KDEConnect.scrcpyRunning || KDEConnect.scrcpyLaunching)
+        embeddedMirrorWarmStopTimer.restart();
     }
-    if (!visible)
-      KDEConnect.forceStopScrcpyProcesses(root.embeddedVideoDevice);
   }
 
   onEmbeddedMirrorAudioEnabledChanged: root.persistEmbeddedMirrorAudioMode()
@@ -1866,7 +1881,7 @@ Item {
     RowLayout {
       id: navButtonContent
       anchors.centerIn: parent
-      spacing: 5 * Style.uiScaleRatio * navButton.sizeScale
+      spacing: Style.marginXS * navButton.sizeScale
 
       NIcon {
         icon: navButton.iconName
@@ -2124,7 +2139,7 @@ Item {
                           Layout.alignment: Qt.AlignVCenter
                           Layout.preferredWidth: 34 * Style.uiScaleRatio
                           Layout.preferredHeight: 34 * Style.uiScaleRatio
-                          radius: 17 * Style.uiScaleRatio
+                          radius: width / 2
                           color: brandBadgeFrameless ? "transparent" : root.shellIconChipColor
                           border.width: brandBadgeFrameless ? 0 : Style.borderS
                           border.color: brandBadgeFrameless ? "transparent" : root.shellIconChipBorderColor
@@ -2366,17 +2381,17 @@ Item {
 
                           ColumnLayout {
                             Layout.fillWidth: true
-                            spacing: 1 * Style.uiScaleRatio
+                            spacing: Style.marginXXS
 
                             NText {
-                              text: pluginApi?.tr("panel.card.battery") || "Battery"
+                              text: pluginApi?.tr("panel.card.battery")
                               pointSize: Style.fontSizeS * 1.15
                               color: root.shellSecondaryTextColor
                             }
 
                             NText {
                               text: root.effectiveBatteryValue(KDEConnect.mainDevice) < 0
-                                ? (pluginApi?.tr("panel.unknown") || "Unknown")
+                                ? pluginApi?.tr("panel.unknown")
                                 : (root.effectiveBatteryValue(KDEConnect.mainDevice) + "%")
                               pointSize: Style.fontSizeL * 1.288
                               font.weight: Style.fontWeightBold
@@ -2399,16 +2414,16 @@ Item {
 
                           ColumnLayout {
                             Layout.fillWidth: true
-                            spacing: 1 * Style.uiScaleRatio
+                            spacing: Style.marginXXS
 
                             NText {
-                              text: pluginApi?.tr("panel.card.network") || "Network"
+                              text: pluginApi?.tr("panel.card.network")
                               pointSize: Style.fontSizeS * 1.15
                               color: root.shellSecondaryTextColor
                             }
 
                             NText {
-                              text: root.effectiveNetworkType(KDEConnect.mainDevice) || (pluginApi?.tr("panel.unknown") || "Unknown")
+                              text: root.effectiveNetworkType(KDEConnect.mainDevice) || pluginApi?.tr("panel.unknown")
                               pointSize: Style.fontSizeL * 1.288
                               font.weight: Style.fontWeightBold
                               color: root.shellPrimaryTextColor
@@ -2430,7 +2445,7 @@ Item {
 
                           ColumnLayout {
                             Layout.fillWidth: true
-                            spacing: 1 * Style.uiScaleRatio
+                            spacing: Style.marginXXS
 
                             NText {
                               text: root.trSafe("panel.card.signal", "Signal")
@@ -2440,7 +2455,7 @@ Item {
 
                             NText {
                               text: deviceData.getSignalStrengthText(root.effectiveSignalStrength(KDEConnect.mainDevice))
-                                || (pluginApi?.tr("panel.unknown") || "Unknown")
+                                || pluginApi?.tr("panel.unknown")
                               pointSize: Style.fontSizeL * 1.288
                               font.weight: Style.fontWeightBold
                               color: root.shellPrimaryTextColor
@@ -2520,7 +2535,7 @@ Item {
                           drawerStatusContent.implicitHeight + (Style.marginM * 1.8),
                           root.phoneSizeValue(104, 118, 132) * Style.uiScaleRatio
                         )
-                        radius: 18 * Style.uiScaleRatio
+                        radius: Style.radiusL
                         color: root.shellCardColor
                         border.width: Style.borderS
                         border.color: root.shellCardBorderColor
@@ -2557,7 +2572,7 @@ Item {
                             Layout.fillWidth: true
                             visible: root.setupRequiredLoopbackCommandVisible()
                             color: root.shellNestedCardColor
-                            radius: 14 * Style.uiScaleRatio
+                            radius: Style.radiusM
                             border.width: Style.borderS
                             border.color: root.shellNestedCardBorderColor
                             implicitHeight: drawerLoopbackCommandColumn.implicitHeight + (Style.marginM * 1.2)
@@ -2639,7 +2654,7 @@ Item {
           Layout.fillHeight: true
           Layout.minimumHeight: implicitHeight
           color: root.shellStageColor
-          radius: 24 * Style.uiScaleRatio
+          radius: Style.radiusL
           implicitHeight: noDevicePairedContent.implicitHeight + (Style.marginL * 2.4)
 
           ColumnLayout {
@@ -2667,7 +2682,7 @@ Item {
               Layout.fillHeight: true
               Layout.minimumHeight: pairStateColumn.implicitHeight + (Style.marginL * 1.8)
               color: root.shellCardColor
-              radius: 20 * Style.uiScaleRatio
+              radius: Style.radiusL
               border.width: Style.borderS
               border.color: root.shellCardBorderColor
 
@@ -2703,7 +2718,7 @@ Item {
                     }
 
                     ColumnLayout {
-                      spacing: 2 * Style.uiScaleRatio
+                      spacing: Style.marginXXS
 
                       NText {
                         text: KDEConnect.mainDevice.pairRequested
@@ -2752,7 +2767,7 @@ Item {
                   Layout.alignment: Qt.AlignHCenter
                   visible: KDEConnect.mainDevice.pairRequested && String(KDEConnect.mainDevice.verificationKey || "").trim() !== ""
                   color: root.shellAccentCardColor
-                  radius: 14 * Style.uiScaleRatio
+                  radius: Style.radiusM
                   border.width: Style.borderS
                   border.color: root.shellAccentCardBorderColor
                   implicitWidth: verificationRow.implicitWidth + (Style.marginM * 1.4)
@@ -2812,7 +2827,7 @@ Item {
           Layout.fillHeight: true
           Layout.minimumHeight: implicitHeight
           color: root.shellStageColor
-          radius: 24 * Style.uiScaleRatio
+          radius: Style.radiusL
           implicitHeight: setupRequiredContent.implicitHeight + (Style.marginL * 2.4)
 
           ColumnLayout {
@@ -2837,7 +2852,7 @@ Item {
               Layout.fillHeight: true
               Layout.minimumHeight: setupRequiredColumn.implicitHeight + (Style.marginL * 1.8)
               color: root.shellCardColor
-              radius: 20 * Style.uiScaleRatio
+              radius: Style.radiusL
               border.width: Style.borderS
               border.color: root.shellCardBorderColor
 
@@ -2873,7 +2888,7 @@ Item {
                     }
 
                     ColumnLayout {
-                      spacing: 2 * Style.uiScaleRatio
+                      spacing: Style.marginXXS
 
                       NText {
                         text: root.trSafe("panel.setup-required.title", "Finish Setup to Connect")
@@ -2930,7 +2945,7 @@ Item {
                   Layout.alignment: Qt.AlignHCenter
                   visible: root.mainDevicePairingInProgress() && String(KDEConnect.mainDevice?.verificationKey || "").trim() !== ""
                   color: root.shellAccentCardColor
-                  radius: 14 * Style.uiScaleRatio
+                  radius: Style.radiusM
                   border.width: Style.borderS
                   border.color: root.shellAccentCardBorderColor
                   implicitWidth: setupVerificationRow.implicitWidth + (Style.marginM * 1.4)
@@ -2977,7 +2992,7 @@ Item {
                   Layout.fillWidth: true
                   visible: root.setupRequiredLoopbackCommandVisible()
                   color: root.shellNestedCardColor
-                  radius: 14 * Style.uiScaleRatio
+                  radius: Style.radiusM
                   border.width: Style.borderS
                   border.color: root.shellNestedCardBorderColor
                   implicitHeight: loopbackCommandColumn.implicitHeight + (Style.marginM * 1.2)
@@ -3060,7 +3075,7 @@ Item {
 
             NIcon {
               icon: "device-mobile-off"
-              pointSize: 48 * Style.uiScaleRatio
+              pointSize: Style.fontSizeXXL * 1.5
               color: Color.mOnSurfaceVariant
               Layout.alignment: Qt.AlignHCenter
             }
@@ -3106,7 +3121,7 @@ Item {
 
             NIcon {
               icon: "exclamation-circle"
-              pointSize: 48 * Style.uiScaleRatio
+              pointSize: Style.fontSizeXXL * 1.5
               color: Color.mOnSurfaceVariant
               Layout.alignment: Qt.AlignHCenter
             }
@@ -3161,7 +3176,7 @@ Item {
 
             NIcon {
               icon: "exclamation-circle"
-              pointSize: 48 * Style.uiScaleRatio
+              pointSize: Style.fontSizeXXL * 1.5
               color: Color.mOnSurfaceVariant
               Layout.alignment: Qt.AlignHCenter
             }
@@ -3330,7 +3345,7 @@ Item {
             spacing: Style.marginM
 
             NText {
-              text: "1. " + root.trSafe("panel.wireless-adb.qr-section-title", "Pair with QR code")
+              text: root.trSafe("panel.wireless-adb.qr-step-title", "1. Pair with QR code")
               font.weight: Style.fontWeightBold
               color: Color.mOnSurface
               Layout.fillWidth: true
@@ -3357,7 +3372,7 @@ Item {
 
                 Image {
                   anchors.fill: parent
-                  anchors.margins: 12 * Style.uiScaleRatio
+                  anchors.margins: Style.marginM
                   source: root.wirelessAdbQrImageSource()
                   fillMode: Image.PreserveAspectFit
                   smooth: true
@@ -3436,7 +3451,7 @@ Item {
             spacing: Style.marginM
 
             NText {
-              text: "2. " + root.trSafe("panel.wireless-adb.pair-section-title", "Pair with code")
+              text: root.trSafe("panel.wireless-adb.pair-step-title", "2. Pair with code")
               font.weight: Style.fontWeightBold
               color: Color.mOnSurface
               Layout.fillWidth: true
@@ -3506,7 +3521,7 @@ Item {
             spacing: Style.marginM
 
             NText {
-              text: "3. " + root.trSafe("panel.wireless-adb.connect-section-title", "Connect after pairing")
+              text: root.trSafe("panel.wireless-adb.connect-step-title", "3. Connect after pairing")
               font.weight: Style.fontWeightBold
               color: Color.mOnSurface
               Layout.fillWidth: true
