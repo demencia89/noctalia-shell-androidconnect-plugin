@@ -8,12 +8,7 @@
   "license": "GPLv2",
   "repository": "https://github.com/demencia89/noctalia-shell-androidconnect-plugin",
   "description": "A Noctalia Android device plugin built on top of the original KDE Connect plugin, with embedded scrcpy support.",
-  "tags": [
-    "Bar",
-    "Panel",
-    "Utility",
-    "System"
-  ],
+  "tags": ["Bar", "Panel", "Utility", "System"],
   "entryPoints": {
     "main": "Main.qml",
     "barWidget": "BarWidget.qml",
@@ -21,9 +16,7 @@
     "panel": "Panel.qml",
     "settings": "Settings.qml"
   },
-  "dependencies": {
-    "plugins": []
-  },
+  "dependencies": { "plugins": [] },
   "metadata": {
     "defaultSettings": {
       "hideIfNoDeviceConnected": false,

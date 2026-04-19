@@ -19,8 +19,8 @@ ColumnLayout {
     Layout.fillWidth: true
     label: pluginApi?.tr("settings.iconColor.label") || "Widget Icon Color"
     description: pluginApi?.tr("settings.iconColor.desc") || "Color of the AndroidConnect bar widget icon"
-    currentKey: root.iconColor
-    onSelected: key => root.iconColor = key
+    currentKey: iconColor
+    onSelected: key => iconColor = key
   }
 
   function saveSettings() {
@@ -29,7 +29,7 @@ ColumnLayout {
       return;
     }
 
-    pluginApi.pluginSettings.iconColor = root.iconColor;
+    pluginApi.pluginSettings.iconColor = iconColor;
     pluginApi.saveSettings();
   }
 }

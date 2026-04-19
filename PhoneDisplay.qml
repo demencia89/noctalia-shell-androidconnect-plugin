@@ -59,82 +59,17 @@ Rectangle {
     readonly property string trimmedMirrorDevicePath: String(mirrorDeviceIdMatch || "").trim()
     readonly property var mediaDevicesRef: mediaDevicesLoader.item
     readonly property var mediaVideoInputs: (mediaDevicesRef && mediaDevicesRef.videoInputs) ? mediaDevicesRef.videoInputs : []
-    readonly property string availableVideoInputsSummary: {
-        const inputs = mediaVideoInputs || [];
-        if (inputs.length === 0)
-            return "";
-
-        return inputs.map((device) => {
-            const description = String(device.description || "").trim();
-            const id = String(device.id || "").trim();
-            if (description !== "" && id !== "")
-                return description + " [" + id + "]";
-
-            return description !== "" ? description : id;
-        }).join(", ");
-    }
     readonly property var selectedVideoInput: {
         const inputs = mediaVideoInputs || [];
-        const exactDescriptionMatch = normalizedDescriptionMatch;
-        const exactIdMatch = normalizedIdMatch;
-
-        for (let i = 0; i < inputs.length; ++i) {
-            const device = inputs[i];
-            const deviceId = String(device.id || "").toLowerCase();
-            const deviceDescription = String(device.description || "").toLowerCase();
-            if (exactDescriptionMatch !== "" && deviceDescription === exactDescriptionMatch)
-                return device;
-
-            if (exactIdMatch !== "" && deviceId === exactIdMatch)
-                return device;
-        }
-
-        for (let i = 0; i < inputs.length; ++i) {
-            const device = inputs[i];
-            const deviceId = String(device.id || "").toLowerCase();
-            const deviceDescription = String(device.description || "").toLowerCase();
-            if (exactDescriptionMatch !== "" && deviceDescription.indexOf(exactDescriptionMatch) !== -1)
-                return device;
-
-            if (exactIdMatch !== "" && deviceId.indexOf(exactIdMatch) !== -1)
-                return device;
-        }
-
-        if (exactDescriptionMatch !== "") {
-            for (let i = 0; i < inputs.length; ++i) {
-                const device = inputs[i];
-                const deviceDescription = String(device.description || "").toLowerCase();
-                const deviceId = String(device.id || "").toLowerCase();
-                if (deviceDescription.indexOf("scrcpy") !== -1 || deviceId.indexOf("scrcpy") !== -1 || deviceDescription.indexOf("loopback") !== -1)
-                    return device;
-            }
-        }
-
-        if (exactIdMatch === "" && exactDescriptionMatch === "") {
-            if (inputs.length === 1)
-                return inputs[0];
-
-            if (mediaDevicesRef && mediaDevicesRef.defaultVideoInput && !mediaDevicesRef.defaultVideoInput.isNull)
-                return mediaDevicesRef.defaultVideoInput;
-        }
-
-        return undefined;
+        return findMatchingVideoInput(inputs, normalizedDescriptionMatch, "description", true)
+            || findMatchingVideoInput(inputs, normalizedIdMatch, "id", true)
+            || findMatchingVideoInput(inputs, normalizedDescriptionMatch, "description", false)
+            || findMatchingVideoInput(inputs, normalizedIdMatch, "id", false)
+            || (normalizedDescriptionMatch !== "" ? findScrcpyVideoInput(inputs) : undefined)
+            || defaultVideoInput(inputs);
     }
-    readonly property string selectedVideoInputSummary: {
-        const input = selectedVideoInput;
-        if (!input || input.isNull)
-            return "none";
-
-        const description = String(input.description || "").trim();
-        const id = String(input.id || "").trim();
-        if (description !== "" && id !== "")
-            return description + " [" + id + "]";
-
-        return description !== "" ? description : id;
-    }
-    readonly property bool mirrorFeedAvailable: selectedVideoInput !== undefined
-        && selectedVideoInput !== null
-        && !selectedVideoInput.isNull
+    readonly property string selectedVideoInputSummary: videoInputSummary(selectedVideoInput)
+    readonly property bool mirrorFeedAvailable: hasVideoInput(selectedVideoInput)
     readonly property bool shouldActivateMirrorCamera: mirrorFeedEnabled
         && mirrorFeedAvailable
         && !mirrorFeedAttachDelayActive
@@ -155,6 +90,63 @@ Rectangle {
     signal textRequested(string text)
     signal keyRequested(int keyCode)
     signal homeRequested()
+
+    function hasVideoInput(input) {
+        return input !== undefined && input !== null && !input.isNull;
+    }
+
+    function videoInputSummary(input) {
+        if (!hasVideoInput(input))
+            return "none";
+
+        const description = String(input.description || "").trim();
+        const id = String(input.id || "").trim();
+        if (description !== "" && id !== "")
+            return description + " [" + id + "]";
+
+        return description !== "" ? description : id;
+    }
+
+    function findMatchingVideoInput(inputs, needle, fieldName, exact) {
+        if (needle === "")
+            return undefined;
+
+        for (let i = 0; i < inputs.length; ++i) {
+            const device = inputs[i];
+            const fieldValue = normalizeText(device ? device[fieldName] : "");
+            if ((exact && fieldValue === needle) || (!exact && fieldValue.indexOf(needle) !== -1))
+                return device;
+        }
+
+        return undefined;
+    }
+
+    function findScrcpyVideoInput(inputs) {
+        for (let i = 0; i < inputs.length; ++i) {
+            const device = inputs[i];
+            const description = normalizeText(device ? device.description : "");
+            const id = normalizeText(device ? device.id : "");
+            if (description.indexOf("scrcpy") !== -1 || id.indexOf("scrcpy") !== -1 || description.indexOf("loopback") !== -1)
+                return device;
+        }
+
+        return undefined;
+    }
+
+    function defaultVideoInput(inputs) {
+        if (normalizedIdMatch !== "" || normalizedDescriptionMatch !== "")
+            return undefined;
+
+        if (inputs.length === 1)
+            return inputs[0];
+
+        const defaultInput = mediaDevicesRef ? mediaDevicesRef.defaultVideoInput : null;
+        return hasVideoInput(defaultInput) ? defaultInput : undefined;
+    }
+
+    function normalizeText(value) {
+        return String(value || "").trim().toLowerCase();
+    }
 
     function shellQuote(value) {
         return "'" + String(value || "").replace(/'/g, "'\"'\"'") + "'";
@@ -203,6 +195,14 @@ Rectangle {
         }
     }
 
+    function resetMirrorState() {
+        mirrorFeedError = "";
+        mirrorFeedLastFrameAtMs = 0;
+        mirrorFeedFrameLive = false;
+        mirrorFeedFrameCount = 0;
+        mirrorFirstFrameLogged = false;
+    }
+
     function reloadMediaDevices() {
         if (mediaDevicesReloadPending)
             return;
@@ -216,11 +216,7 @@ Rectangle {
         if (!mirrorFeedEnabled)
             return;
 
-        mirrorFeedError = "";
-        mirrorFeedLastFrameAtMs = 0;
-        mirrorFeedFrameLive = false;
-        mirrorFeedFrameCount = 0;
-        mirrorFirstFrameLogged = false;
+        resetMirrorState();
         debugLog("probeNativeLoopback selectedInput=" + selectedVideoInputSummary);
         reloadMediaDevices();
     }
@@ -238,13 +234,9 @@ Rectangle {
     }
 
     onMirrorFeedEnabledChanged: {
-        mirrorFeedError = "";
         mediaDevicesReloadPending = false;
         mirrorFeedAttachDelayActive = mirrorFeedEnabled;
-        mirrorFeedLastFrameAtMs = 0;
-        mirrorFeedFrameLive = false;
-        mirrorFeedFrameCount = 0;
-        mirrorFirstFrameLogged = false;
+        resetMirrorState();
         debugLog("mirrorFeedEnabled=" + mirrorFeedEnabled
             + " devicePath=" + trimmedMirrorDevicePath
             + " descriptionMatch=" + String(mirrorDeviceDescriptionMatch || ""));
@@ -265,9 +257,7 @@ Rectangle {
 
         debugLog("mirrorFeedAvailable=" + mirrorFeedAvailable
             + " selectedInput=" + selectedVideoInputSummary);
-        mirrorFeedError = "";
-        mirrorFeedLastFrameAtMs = 0;
-        mirrorFeedFrameLive = false;
+        resetMirrorState();
     }
 
     onMirrorFeedErrorChanged: {
@@ -355,18 +345,14 @@ Rectangle {
             phoneRoot.debugLog("camera active=" + active
                 + " selectedInput=" + selectedVideoInputSummary);
             if (active) {
-                phoneRoot.mirrorFeedError = "";
-                phoneRoot.mirrorFeedLastFrameAtMs = 0;
-                phoneRoot.mirrorFeedFrameLive = false;
+                phoneRoot.resetMirrorState();
             } else {
                 phoneRoot.mirrorFeedFrameLive = false;
             }
         }
         onCameraDeviceChanged: {
             phoneRoot.debugLog("cameraDeviceChanged selectedInput=" + selectedVideoInputSummary);
-            phoneRoot.mirrorFeedError = "";
-            phoneRoot.mirrorFeedLastFrameAtMs = 0;
-            phoneRoot.mirrorFeedFrameLive = false;
+            phoneRoot.resetMirrorState();
         }
         onErrorOccurred: (error, errorString) => {
             phoneRoot.mirrorFeedFrameLive = false;
@@ -378,9 +364,7 @@ Rectangle {
         target: mirrorCamera
         property: "cameraDevice"
         when: phoneRoot.shouldActivateMirrorCamera
-            && phoneRoot.selectedVideoInput !== undefined
-            && phoneRoot.selectedVideoInput !== null
-            && !phoneRoot.selectedVideoInput.isNull
+            && phoneRoot.hasVideoInput(phoneRoot.selectedVideoInput)
         value: phoneRoot.selectedVideoInput
     }
 

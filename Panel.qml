@@ -22,13 +22,7 @@ Item {
   readonly property bool panelAnchorTop: true
   readonly property bool panelAnchorRight: true
 
-  property real contentPreferredWidth: {
-    if (phoneSizePresetIndex === 0)
-      return 560 * Style.uiScaleRatio;
-    if (phoneSizePresetIndex === 1)
-      return 620 * Style.uiScaleRatio;
-    return 680 * Style.uiScaleRatio;
-  }
+  property real contentPreferredWidth: phoneSizeValue(560, 620, 680) * Style.uiScaleRatio
   property real contentPreferredHeight: deviceData.implicitHeight + (Style.marginM * 2)
 
   readonly property bool allowAttach: true
@@ -56,18 +50,10 @@ Item {
   readonly property real phoneBaseHeight: 732 * Style.uiScaleRatio
   readonly property real phoneBaseWidth: phoneBaseHeight * (597 / 1241)
   property int phoneSizePresetIndex: initialPhoneSizePresetIndex()
-  readonly property real phoneSizeFactor: phoneSizePresetIndex === 0
-    ? 0.60
-    : (phoneSizePresetIndex === 1 ? 0.75 : 1.0)
-  readonly property int phoneSizePercent: phoneSizePresetIndex === 0
-    ? 60
-    : (phoneSizePresetIndex === 1 ? 75 : 100)
-  readonly property string phoneSizeLabel: phoneSizePresetIndex === 0
-    ? "Small"
-    : (phoneSizePresetIndex === 1 ? "Med" : "Large")
-  readonly property real navButtonScaleFactor: phoneSizePresetIndex === 0
-    ? 0.82
-    : (phoneSizePresetIndex === 1 ? 0.91 : 1.0)
+  readonly property real phoneSizeFactor: phoneSizeValue(0.60, 0.75, 1.0)
+  readonly property int phoneSizePercent: phoneSizeValue(60, 75, 100)
+  readonly property string phoneSizeLabel: phoneSizeValue("Small", "Med", "Large")
+  readonly property real navButtonScaleFactor: phoneSizeValue(0.82, 0.91, 1.0)
   readonly property var panelResizeBezierCurve: [0.05, 0, 0.133, 0.06, 0.166, 0.4, 0.208, 0.82, 0.25, 1, 1, 1]
   property bool phoneSizeAnimationEnabled: false
   property int phoneSizeStepDirection: initialPhoneSizeStepDirection()
@@ -131,52 +117,34 @@ Item {
     repeat: false
     onTriggered: {
       if (!root.panelOpenUnlockPending || !root.visible || !root.embeddedMirrorModeEnabled()) {
-        root.panelOpenUnlockPending = false;
-        root.panelOpenUnlockRetriesRemaining = 0;
+        root.clearPanelOpenUnlockState();
         return;
       }
 
       if (!KDEConnect.scrcpyRunning || KDEConnect.scrcpyLaunching) {
-        if (root.panelOpenUnlockRetriesRemaining > 0) {
-          root.panelOpenUnlockRetriesRemaining -= 1;
-          restart();
-        } else {
-          root.panelOpenUnlockPending = false;
-        }
+        root.retryPanelOpenUnlock();
         return;
       }
 
       if (!root.embeddedMirrorTouchActive()) {
-        root.refreshEmbeddedMirrorTouchMapping();
-        if (root.panelOpenUnlockRetriesRemaining > 0) {
-          root.panelOpenUnlockRetriesRemaining -= 1;
-          restart();
-        } else {
-          root.panelOpenUnlockPending = false;
-        }
+        root.scheduleTouchMappingRefresh();
+        root.retryPanelOpenUnlock();
         return;
       }
 
       const serial = root.currentMirrorAdbSerial();
       if (serial === "") {
-        root.panelOpenUnlockPending = false;
-        root.panelOpenUnlockRetriesRemaining = 0;
+        root.clearPanelOpenUnlockState();
         return;
       }
 
       if (!KDEConnect.hasFreshAdbScreenState(serial)) {
         KDEConnect.queryAdbScreenState(serial);
-        if (root.panelOpenUnlockRetriesRemaining > 0) {
-          root.panelOpenUnlockRetriesRemaining -= 1;
-          restart();
-        } else {
-          root.panelOpenUnlockPending = false;
-        }
+        root.retryPanelOpenUnlock();
         return;
       }
 
-      root.panelOpenUnlockPending = false;
-      root.panelOpenUnlockRetriesRemaining = 0;
+      root.clearPanelOpenUnlockState();
       if (!KDEConnect.adbUnlockNeeded)
         return;
 
@@ -215,14 +183,10 @@ Item {
   }
 
   onEmbeddedVideoDeviceChanged: {
-    embeddedVideoDeviceCheckKnown = false;
-    embeddedVideoDeviceAccessible = false;
+    resetEmbeddedVideoDeviceAccess(false);
     Qt.callLater(function() {
       root.refreshEmbeddedVideoDeviceAccess();
     });
-  }
-
-  onPhoneSizePresetIndexChanged: {
   }
 
   Connections {
@@ -237,9 +201,7 @@ Item {
         root.refreshPanelOpenUnlockState();
 
       if (root.embeddedMirrorModeEnabled() && KDEConnect.scrcpyRunning && root.activePhonePreview) {
-        Qt.callLater(function() {
-          root.refreshEmbeddedMirrorTouchMapping();
-        });
+        root.scheduleTouchMappingRefresh();
       }
 
       if (root.visible && KDEConnect.scrcpyRunning)
@@ -265,9 +227,7 @@ Item {
       }
 
       if (root.embeddedMirrorModeEnabled() && KDEConnect.scrcpyRunning) {
-        Qt.callLater(function() {
-          root.refreshEmbeddedMirrorTouchMapping();
-        });
+        root.scheduleTouchMappingRefresh();
       }
 
       if (root.visible && root.panelOpenUnlockPending && KDEConnect.scrcpyRunning)
@@ -309,8 +269,7 @@ Item {
       if (!isFeedFailure)
         return;
 
-      root.embeddedVideoDeviceAccessible = false;
-      root.embeddedVideoDeviceCheckKnown = false;
+      root.resetEmbeddedVideoDeviceAccess(false);
       Qt.callLater(function() {
         root.refreshEmbeddedVideoDeviceAccess();
       });
@@ -329,9 +288,7 @@ Item {
               : root.trSafe("panel.wireless-adb.success-description", "ADB over TCP/IP enabled"));
         root.wirelessAdbStatusMessage = body;
         ToastService.showNotice(root.trSafe("panel.wireless-adb.success-title", "Wireless ADB"), body, "wifi");
-        Qt.callLater(function() {
-          root.refreshEmbeddedMirrorTouchMapping();
-        });
+        root.scheduleTouchMappingRefresh();
       } else {
         const body = message === "missing_command"
           ? root.trSafe("panel.wireless-adb.missing-command-description", "Wireless ADB could not start the built-in adb tcpip helper.")
@@ -362,8 +319,7 @@ Item {
     KDEConnect.reduceBackgroundRefresh = false;
     embeddedMirrorAutoStartTimer.stop();
     panelOpenUnlockTimer.stop();
-    root.panelOpenUnlockPending = false;
-    root.panelOpenUnlockRetriesRemaining = 0;
+    root.clearPanelOpenUnlockState();
     KDEConnect.forceStopScrcpyProcesses(root.embeddedVideoDevice);
   }
 
@@ -393,8 +349,7 @@ Item {
       embeddedMirrorFormatLockTimer.stop();
       panelStatusGraceTimer.stop();
       panelOpenUnlockTimer.stop();
-      root.panelOpenUnlockPending = false;
-      root.panelOpenUnlockRetriesRemaining = 0;
+      root.clearPanelOpenUnlockState();
     }
     if (!visible)
       KDEConnect.forceStopScrcpyProcesses(root.embeddedVideoDevice);
@@ -602,6 +557,14 @@ Item {
     persistPhoneSizePreset();
   }
 
+  function phoneSizeValue(small, medium, large) {
+    if (phoneSizePresetIndex === 0)
+      return small;
+    if (phoneSizePresetIndex === 1)
+      return medium;
+    return large;
+  }
+
   function initialPhoneSizePresetIndex() {
     const explicitKey = String(cfg.phoneSizePresetKey ?? defaults.phoneSizePresetKey ?? "").trim().toLowerCase();
     if (explicitKey === "small")
@@ -620,11 +583,7 @@ Item {
   }
 
   function currentPhoneSizePresetKey() {
-    if (phoneSizePresetIndex === 0)
-      return "small";
-    if (phoneSizePresetIndex === 1)
-      return "medium";
-    return "large";
+    return phoneSizeValue("small", "medium", "large");
   }
 
   function initialPhoneSizeStepDirection() {
@@ -1053,10 +1012,35 @@ Item {
     return (embeddedVideoDevice || "").trim() !== "";
   }
 
+  function scheduleTouchMappingRefresh() {
+    Qt.callLater(function() {
+      root.refreshEmbeddedMirrorTouchMapping();
+    });
+  }
+
+  function clearPanelOpenUnlockState() {
+    root.panelOpenUnlockPending = false;
+    root.panelOpenUnlockRetriesRemaining = 0;
+  }
+
+  function retryPanelOpenUnlock() {
+    if (root.panelOpenUnlockRetriesRemaining > 0) {
+      root.panelOpenUnlockRetriesRemaining -= 1;
+      panelOpenUnlockTimer.restart();
+      return;
+    }
+
+    root.clearPanelOpenUnlockState();
+  }
+
+  function resetEmbeddedVideoDeviceAccess(checkKnown) {
+    embeddedVideoDeviceAccessible = false;
+    embeddedVideoDeviceCheckKnown = Boolean(checkKnown);
+  }
+
   function refreshEmbeddedVideoDeviceAccess() {
     if (!embeddedMirrorFeedConfigured()) {
-      embeddedVideoDeviceAccessible = false;
-      embeddedVideoDeviceCheckKnown = true;
+      resetEmbeddedVideoDeviceAccess(true);
       embeddedVideoDeviceLastCheckAtMs = Date.now();
       return;
     }
@@ -1065,7 +1049,7 @@ Item {
       return;
 
     if (!embeddedVideoDeviceCheckKnown)
-      embeddedVideoDeviceAccessible = false;
+      resetEmbeddedVideoDeviceAccess(false);
     embeddedVideoDeviceCheckProc.running = true;
   }
 
@@ -2196,7 +2180,7 @@ Item {
                         Layout.preferredHeight: Math.min(
                           implicitHeight,
                           Math.max(
-                            (root.phoneSizePresetIndex === 0 ? 104 : (root.phoneSizePresetIndex === 1 ? 118 : 132)) * Style.uiScaleRatio,
+                            root.phoneSizeValue(104, 118, 132) * Style.uiScaleRatio,
                             phonePreviewContainer.height
                               - rightInfoColumn.Layout.topMargin
                               - deviceSummaryColumn.implicitHeight
@@ -2208,7 +2192,7 @@ Item {
                         visible: root.embeddedMirrorDrawerStatusVisible(phonePreview)
                         implicitHeight: Math.max(
                           drawerStatusContent.implicitHeight + (Style.marginM * 1.8),
-                          (root.phoneSizePresetIndex === 0 ? 104 : (root.phoneSizePresetIndex === 1 ? 118 : 132)) * Style.uiScaleRatio
+                          root.phoneSizeValue(104, 118, 132) * Style.uiScaleRatio
                         )
                         radius: 18 * Style.uiScaleRatio
                         color: "#211814"
@@ -2225,7 +2209,7 @@ Item {
                           NText {
                             Layout.fillWidth: true
                             text: root.embeddedMirrorDrawerStatusTitle(phonePreview)
-                            pointSize: Style.fontSizeS * (root.phoneSizePresetIndex === 0 ? 1.02 : 1.1)
+                            pointSize: Style.fontSizeS * root.phoneSizeValue(1.02, 1.1, 1.1)
                             font.weight: Style.fontWeightBold
                             color: "#fff4ed"
                             visible: text !== ""
@@ -2237,7 +2221,7 @@ Item {
                           NText {
                             Layout.fillWidth: true
                             text: root.embeddedMirrorDrawerStatusSubtitle(phonePreview)
-                            pointSize: Style.fontSizeXS * (root.phoneSizePresetIndex === 0 ? 1.0 : 1.06)
+                            pointSize: Style.fontSizeXS * root.phoneSizeValue(1.0, 1.06, 1.06)
                             color: "#d9c8bb"
                             visible: text !== ""
                             wrapMode: Text.WordWrap

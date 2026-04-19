@@ -67,7 +67,7 @@ QtObject {
   readonly property int refreshIntervalMs: reduceBackgroundRefresh ? 20000 : 5000
   property double scrcpyLaunchStartedAtMs: 0
 
-  property bool anyDevicesConnected: false;
+  property bool anyDevicesConnected: false
 
   signal wirelessAdbFinished(bool success, string message)
   signal adbDevicesRefreshed()
@@ -160,36 +160,35 @@ QtObject {
   }
 
   function triggerFindMyPhone(deviceId: string): void {
-    const proc = findMyPhoneComponent.createObject(root, { deviceId: deviceId });
-    proc.running = true;
+    startProcessComponent(findMyPhoneComponent, { deviceId: deviceId });
   }
 
   function browseFiles(deviceId: string): void {
-    const proc = browseFilesComponent.createObject(root, { deviceId: deviceId });
-    proc.running = true;
+    startProcessComponent(browseFilesComponent, { deviceId: deviceId });
   }
 
   // Share a file with a device
   function shareFile(deviceId: string, filePath: string): void {
-    var proc = shareComponent.createObject(root, {
+    startProcessComponent(shareComponent, {
       deviceId: deviceId,
       fileUrl: normalizedFileShareUrl(filePath)
     });
-    proc.running = true;
   }
 
   function requestPairing(deviceId: string): void {
-    const proc = requestPairingComponent.createObject(root, { deviceId: deviceId });
-    proc.running = true;
+    startProcessComponent(requestPairingComponent, { deviceId: deviceId });
   }
 
   function unpairDevice(deviceId: string): void {
-    const proc = unpairingComponent.createObject(root, { deviceId: deviceId });
-    proc.running = true;
+    startProcessComponent(unpairingComponent, { deviceId: deviceId });
   }
 
   function wakeUpDevice(deviceId: string): void {
-    const proc = wakeUpDeviceComponent.createObject(root, { deviceId: deviceId });
+    startProcessComponent(wakeUpDeviceComponent, { deviceId: deviceId });
+  }
+
+  function startProcessComponent(component, properties = {}): void {
+    const proc = component.createObject(root, properties);
     proc.running = true;
   }
 
