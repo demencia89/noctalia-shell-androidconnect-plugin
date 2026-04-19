@@ -295,7 +295,7 @@ Rectangle {
     Timer {
         id: mirrorFeedAttachDelayTimer
 
-        interval: 1400
+        interval: 500
         repeat: false
         onTriggered: {
             phoneRoot.mirrorFeedAttachDelayActive = false;
@@ -461,7 +461,7 @@ Rectangle {
 
             Rectangle {
                 anchors.fill: parent
-                visible: !phoneRoot.mirrorDisplayVisible
+                opacity: phoneRoot.mirrorDisplayVisible ? 0 : 1
 
                 gradient: Gradient {
                     GradientStop {
@@ -479,6 +479,13 @@ Rectangle {
                         color: "#07090d"
                     }
                 }
+
+                Behavior on opacity {
+                    NumberAnimation {
+                        duration: 220
+                        easing.type: Easing.OutCubic
+                    }
+                }
             }
 
             Rectangle {
@@ -488,22 +495,68 @@ Rectangle {
                 width: phoneRoot.videoFrameWidth
                 height: phoneRoot.videoFrameHeight
                 radius: phoneRoot.videoFrameRadius
-                color: phoneRoot.mirrorDisplayVisible ? "black" : "transparent"
+                color: "transparent"
                 antialiasing: true
                 visible: phoneRoot.mirrorFeedEnabled
                 clip: true
-                layer.enabled: videoFrame.visible && phoneRoot.mirrorDisplayVisible
+                layer.enabled: videoFrame.visible && mirrorVideoReveal.visible
 
-                VideoOutput {
-                    id: mirrorVideoOutput
+                Rectangle {
+                    id: videoFrameBed
 
                     anchors.fill: parent
-                    visible: phoneRoot.shouldActivateMirrorCamera
+                    color: "black"
+                    opacity: mirrorVideoReveal.opacity
+
+                    Behavior on opacity {
+                        NumberAnimation {
+                            duration: 180
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+                }
+
+                Item {
+                    id: mirrorVideoReveal
+
+                    anchors.fill: parent
+                    visible: phoneRoot.shouldActivateMirrorCamera || opacity > 0.001
                     opacity: phoneRoot.mirrorDisplayVisible ? 1 : 0
-                    fillMode: VideoOutput.Stretch
-                    onSourceRectChanged: {
-                        if (sourceRect.width > 0 && sourceRect.height > 0)
-                            phoneRoot.debugLog("videoOutput sourceRect=" + activeSourceRectSummary);
+                    scale: phoneRoot.mirrorDisplayVisible ? 1 : 0.9875
+                    y: phoneRoot.mirrorDisplayVisible ? 0 : (8 * phoneRoot.scaleFactor)
+                    transformOrigin: Item.Center
+
+                    Behavior on opacity {
+                        NumberAnimation {
+                            duration: 220
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+
+                    Behavior on scale {
+                        NumberAnimation {
+                            duration: 280
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+
+                    Behavior on y {
+                        NumberAnimation {
+                            duration: 280
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+
+                    VideoOutput {
+                        id: mirrorVideoOutput
+
+                        anchors.fill: parent
+                        visible: phoneRoot.shouldActivateMirrorCamera || parent.opacity > 0.001
+                        fillMode: VideoOutput.Stretch
+                        onSourceRectChanged: {
+                            if (sourceRect.width > 0 && sourceRect.height > 0)
+                                phoneRoot.debugLog("videoOutput sourceRect=" + activeSourceRectSummary);
+                        }
                     }
                 }
 

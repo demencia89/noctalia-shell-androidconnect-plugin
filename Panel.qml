@@ -88,7 +88,7 @@ Item {
 
   Timer {
     id: embeddedMirrorAutoStartTimer
-    interval: 180
+    interval: 60
     repeat: false
     onTriggered: {
       root.attemptEmbeddedMirrorAutoStart();
@@ -97,7 +97,7 @@ Item {
 
   Timer {
     id: embeddedMirrorFormatLockTimer
-    interval: 700
+    interval: 100
     repeat: false
     onTriggered: {
       if (!root.visible
@@ -1333,13 +1333,15 @@ Item {
       "device=" + KDEConnect.shellQuote(root.embeddedVideoDevice)
       + "; [ -c \"$device\" ] || exit 2"
       + "; base=/sys/devices/virtual/video4linux/$(basename \"$device\")"
-      + "; i=0; fmt=''"
-      + "; while [ $i -lt 30 ]; do"
+      + "; i=0; fmt=''; prev_fmt=''; stable_fmt=''"
+      + "; while [ $i -lt 40 ]; do"
       + " fmt=$(cat \"$base/format\" 2>/dev/null || true)"
-      + "; [ -n \"$fmt\" ] && break"
+      + "; if [ -n \"$fmt\" ] && [ \"$fmt\" = \"$prev_fmt\" ]; then stable_fmt=\"$fmt\"; break; fi"
+      + "; [ -n \"$fmt\" ] && prev_fmt=\"$fmt\""
       + "; i=$((i+1))"
-      + "; sleep 0.12"
+      + "; sleep 0.05"
       + "; done"
+      + "; [ -n \"$stable_fmt\" ] && fmt=\"$stable_fmt\" || fmt=\"$prev_fmt\""
       + "; [ -n \"$fmt\" ] || exit 3"
       + "; v4l2-ctl -d \"$device\" -c keep_format=1 >/dev/null 2>&1 || exit 4"
       + "; printf 'locked_format=%s\\n' \"$fmt\""
@@ -1527,7 +1529,18 @@ Item {
     if (!embeddedMirrorInputActive())
       return;
 
-    KDEConnect.runAdbKeyevent(currentMirrorAdbSerial(), 224); // WAKEUP
+    const serial = currentMirrorAdbSerial();
+    if (serial === "")
+      return;
+
+    const hasFreshState = KDEConnect.hasFreshAdbScreenState(serial);
+    const shouldWake = !hasFreshState || !KDEConnect.adbScreenInteractive;
+    const shouldUnlock = hasFreshState && KDEConnect.adbScreenLockState === "true";
+
+    if (shouldWake)
+      KDEConnect.runAdbKeyevent(serial, 224); // WAKEUP
+    if (shouldUnlock)
+      KDEConnect.runAdbKeyevent(serial, 82); // MENU / dismiss keyguard
   }
 
   component NavActionButton: Rectangle {

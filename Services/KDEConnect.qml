@@ -621,6 +621,17 @@ QtObject {
   function buildScrcpyPreLaunchCommand(serial: string, feedDevicePath: string): var {
     const adbPrefix = shellJoinArgs(["adb"].concat(adbSelectorArgsForSerial(serial)));
     const device = String(feedDevicePath || "").trim();
+    const preLaunchStateScript = [
+      "power=$(dumpsys power 2>/dev/null || true)",
+      "policy=$(dumpsys window policy 2>/dev/null || true)",
+      "interactive=false",
+      "if printf '%s\\n' \"$power\" | grep -Eq 'mWakefulness=Awake|mInteractive=true|Display Power: state=ON'; then interactive=true; fi",
+      "locked=unknown",
+      "if printf '%s\\n' \"$policy\" | grep -Eq 'showing=true|mShowingLockscreen=true|isStatusBarKeyguard=true'; then locked=true;"
+        + " elif printf '%s\\n' \"$policy\" | grep -Eq 'showing=false|mShowingLockscreen=false|isStatusBarKeyguard=false'; then locked=false; fi",
+      "if [ \"$interactive\" != true ]; then input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true; sleep 0.05; fi",
+      "if [ \"$locked\" = true ]; then input keyevent 82 >/dev/null 2>&1 || true; sleep 0.10; fi"
+    ].join("; ");
     const script = [
       "device=" + shellQuote(device),
       "for pid in $(pgrep -x scrcpy || true); do",
@@ -629,9 +640,7 @@ QtObject {
       "    kill -TERM \"$pid\" 2>/dev/null || true",
       "  fi",
       "done",
-      adbPrefix + " shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true",
-      adbPrefix + " shell input keyevent 82 >/dev/null 2>&1 || true",
-      "sleep 1"
+      adbPrefix + " shell sh -c " + shellQuote(preLaunchStateScript) + " >/dev/null 2>&1 || true"
     ].join("\n");
 
     return ["sh", "-lc", script];
@@ -753,8 +762,8 @@ QtObject {
       + "; locked=unknown"
       + "; if printf '%s\\n' \"$policy\" | grep -Eq 'showing=true|mShowingLockscreen=true|isStatusBarKeyguard=true'; then locked=true;"
       + " elif printf '%s\\n' \"$policy\" | grep -Eq 'showing=false|mShowingLockscreen=false|isStatusBarKeyguard=false'; then locked=false; fi"
-      + "; unlockNeeded=true"
-      + "; if [ \"$interactive\" = true ] && [ \"$locked\" = false ]; then unlockNeeded=false; fi"
+      + "; unlockNeeded=false"
+      + "; if [ \"$locked\" = true ]; then unlockNeeded=true; fi"
       + "; printf 'interactive=%s\\nlocked=%s\\nunlockNeeded=%s\\n' \"$interactive\" \"$locked\" \"$unlockNeeded\""
     ]);
   }
