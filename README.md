@@ -113,7 +113,8 @@ If you want the phone rendered inside the panel:
    Example:
 
 ```bash
-sudo modprobe v4l2loopback video_nr=10 card_label=scrcpy-panel exclusive_caps=1
+sudo modprobe -r v4l2loopback 2>/dev/null || true
+sudo modprobe v4l2loopback devices=1 video_nr=10 card_label=scrcpy-panel exclusive_caps=0 max_width=960 max_height=2160
 ```
 
 2. Make sure `/dev/video10` exists and `scrcpy-panel` is visible to Qt Multimedia.
@@ -122,7 +123,7 @@ sudo modprobe v4l2loopback video_nr=10 card_label=scrcpy-panel exclusive_caps=1
 
 Notes:
 - The embedded mirror always uses the feed path.
-- If the feed is unavailable, verify that the loopback device exists, is writable, and matches the configured label.
+- If the feed is unavailable, verify that the loopback device exists, is writable, matches the configured label, and is not using `exclusive_caps=1`.
 - If the phone is already mirrored when you open the plugin, AndroidConnect sends unlock-only and does not send Home.
 
 ## Wireless ADB Setup

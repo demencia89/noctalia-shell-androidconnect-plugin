@@ -25,6 +25,7 @@ QtObject {
   property bool scrcpyLaunching: false
   property bool scrcpyStopRequested: false
   property var scrcpyCommandArgs: []
+  property var scrcpyPendingCommandArgs: []
   property string scrcpyLaunchError: ""
   property string scrcpyLastStderr: ""
   property string scrcpyDeviceId: ""
@@ -49,6 +50,13 @@ QtObject {
   property int adbScreenHeight: 0
   property string adbScreenSerial: ""
   property string adbScreenError: ""
+  property string adbScreenStateSerial: ""
+  property string adbScreenStateKnownSerial: ""
+  property string adbScreenStateRaw: ""
+  property string adbScreenStateError: ""
+  property string adbScreenLockState: "unknown"
+  property bool adbScreenInteractive: false
+  property bool adbUnlockNeeded: true
   property string adbQueuedSerial: ""
   property var adbQueuedArgs: []
   property string adbQueuedKind: ""
@@ -63,6 +71,7 @@ QtObject {
 
   signal wirelessAdbFinished(bool success, string message)
   signal adbDevicesRefreshed()
+  signal adbScreenStateRefreshed(string serial, bool unlockNeeded, bool interactive, string lockState)
 
   onDevicesChanged: {
     setMainDevice(root.mainDeviceId)
@@ -223,16 +232,23 @@ QtObject {
       launchSerial = root.usbSelectionSentinel;
     scrcpyActiveSerial = launchSerial;
     scrcpyLaunchStartedAtMs = Date.now();
-    scrcpyCommandArgs = parsedCommand.args;
-    Logger.i("KDEConnect", "Launching scrcpy session:",
+    scrcpyCommandArgs = [];
+    scrcpyPendingCommandArgs = parsedCommand.args;
+    Logger.i("KDEConnect", "Preparing scrcpy session:",
       "deviceId=" + scrcpyDeviceId,
       "serial=" + (isUsbSelectionSerial(launchSerial) ? "usb" : launchSerial),
       "program=" + String(parsedCommand.args[0] || ""));
-    scrcpySessionProc.running = true;
+    scrcpyPreLaunchProc.running = true;
     return true;
   }
 
   function stopScrcpySession(): void {
+    if (scrcpyPreLaunchProc.running) {
+      scrcpyStopRequested = true;
+      scrcpyPreLaunchProc.signal(15);
+      return;
+    }
+
     if (!scrcpyRunning)
       return;
 
@@ -243,7 +259,7 @@ QtObject {
   function forceStopScrcpyProcesses(feedDevicePath: string): void {
     scrcpyCleanupFeedDevicePath = String(feedDevicePath || "").trim();
 
-    if (scrcpyRunning)
+    if (scrcpyRunning || scrcpyPreLaunchProc.running)
       stopScrcpySession();
 
     if (!scrcpyCleanupProc.running)
@@ -258,7 +274,7 @@ QtObject {
     return String(commandString || "").replace(/\s+/g, " ").trim();
   }
 
-  function parseCommandArgs(commandString: string) {
+  function parseCommandArgs(commandString: string): var {
     const source = String(commandString || "").trim();
     const parsedArgs = [];
     let current = "";
@@ -353,29 +369,6 @@ QtObject {
       return normalizeShellCommand(commandString);
 
     return normalizeShellCommand(commandString + " " + optionText);
-  }
-
-  function applyMirrorPerformancePreset(commandString: string, presetName: string): string {
-    let command = normalizeShellCommand(commandString);
-    const preset = String(presetName || "").trim().toLowerCase();
-    let bitrateOption = "--video-bit-rate=8M";
-    let maxFpsOption = "--max-fps=60";
-
-    if (command === "")
-      return "";
-
-    if (preset === "quality") {
-      bitrateOption = "--video-bit-rate=10M";
-    } else if (preset === "latency") {
-      bitrateOption = "--video-bit-rate=6M";
-      maxFpsOption = "--max-fps=60";
-    }
-
-    command = appendScrcpyOption(command, /(^|\s)--max-fps(?:=\S+|\s+\S+)\b/, maxFpsOption);
-    command = appendScrcpyOption(command, /(^|\s)(?:-b|--video-bit-rate)(?:=\S+|\s+\S+)\b/, bitrateOption);
-    command = appendScrcpyOption(command, /(^|\s)--video-codec(?:=\S+|\s+\S+)\b/, "--video-codec=h264");
-    command = appendScrcpyOption(command, /(^|\s)--v4l2-buffer(?:=\S+|\s+\S+)\b/, "--v4l2-buffer=0");
-    return command;
   }
 
   function applyConfiguredMirrorAudioMode(commandString: string, audioEnabled: bool): string {
@@ -611,18 +604,41 @@ QtObject {
     ]);
   }
 
-  function adbCommand(serial: string, args) {
-    let command = ["adb"];
-    const trimmedSerial = (serial || "").trim();
-    if (isUsbSelectionSerial(trimmedSerial))
-      command = command.concat(["-d"]);
-    else if (trimmedSerial !== "")
-      command = command.concat(["-s", trimmedSerial]);
-
-    return command.concat(args.map(arg => String(arg)));
+  function adbCommand(serial: string, args): var {
+    return ["adb"]
+      .concat(adbSelectorArgsForSerial(serial))
+      .concat(args.map(arg => String(arg)));
   }
 
-  function shellJoinArgs(args) {
+  function adbSelectorArgsForSerial(serial: string): var {
+    const trimmedSerial = String(serial || "").trim();
+    if (isUsbSelectionSerial(trimmedSerial))
+      return ["-d"];
+    if (trimmedSerial !== "")
+      return ["-s", trimmedSerial];
+    return [];
+  }
+
+  function buildScrcpyPreLaunchCommand(serial: string, feedDevicePath: string): var {
+    const adbPrefix = shellJoinArgs(["adb"].concat(adbSelectorArgsForSerial(serial)));
+    const device = String(feedDevicePath || "").trim();
+    const script = [
+      "device=" + shellQuote(device),
+      "for pid in $(pgrep -x scrcpy || true); do",
+      "  cmd=$(tr '\\0' '\\n' </proc/$pid/cmdline 2>/dev/null || true)",
+      "  if [ -n \"$device\" ] && printf '%s\\n' \"$cmd\" | grep -Fqx -- \"--v4l2-sink=$device\"; then",
+      "    kill -TERM \"$pid\" 2>/dev/null || true",
+      "  fi",
+      "done",
+      adbPrefix + " shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true",
+      adbPrefix + " shell input keyevent 82 >/dev/null 2>&1 || true",
+      "sleep 1"
+    ].join("\n");
+
+    return ["sh", "-lc", script];
+  }
+
+  function shellJoinArgs(args): string {
     return (Array.isArray(args) ? args : []).map(arg => shellQuote(String(arg))).join(" ");
   }
 
@@ -707,6 +723,41 @@ QtObject {
     adbDisplayInfoStderr = "";
     adbScreenError = "";
     return queueAdbTask("display-info", trimmedSerial, ["shell", "wm", "size"]);
+  }
+
+  function hasFreshAdbScreenState(serial: string): bool {
+    const trimmedSerial = String(serial || "").trim();
+    return trimmedSerial !== ""
+      && adbScreenStateKnownSerial === trimmedSerial
+      && adbScreenStateError === "";
+  }
+
+  function queryAdbScreenState(serial: string): bool {
+    const trimmedSerial = String(serial || "").trim();
+    if (trimmedSerial === ""
+        || adbScreenStateSerial !== ""
+        || hasQueuedAdbTask("screen-state", trimmedSerial))
+      return false;
+
+    adbScreenStateSerial = trimmedSerial;
+    adbScreenStateKnownSerial = "";
+    adbScreenStateRaw = "";
+    adbScreenStateError = "";
+    return queueAdbTask("screen-state", trimmedSerial, [
+      "shell",
+      "sh",
+      "-c",
+      "power=$(dumpsys power 2>/dev/null || true)"
+      + "; policy=$(dumpsys window policy 2>/dev/null || true)"
+      + "; interactive=false"
+      + "; if printf '%s\\n' \"$power\" | grep -Eq 'mWakefulness=Awake|mInteractive=true|Display Power: state=ON'; then interactive=true; fi"
+      + "; locked=unknown"
+      + "; if printf '%s\\n' \"$policy\" | grep -Eq 'showing=true|mShowingLockscreen=true|isStatusBarKeyguard=true'; then locked=true;"
+      + " elif printf '%s\\n' \"$policy\" | grep -Eq 'showing=false|mShowingLockscreen=false|isStatusBarKeyguard=false'; then locked=false; fi"
+      + "; unlockNeeded=true"
+      + "; if [ \"$interactive\" = true ] && [ \"$locked\" = false ]; then unlockNeeded=false; fi"
+      + "; printf 'interactive=%s\\nlocked=%s\\nunlockNeeded=%s\\n' \"$interactive\" \"$locked\" \"$unlockNeeded\""
+    ]);
   }
 
   function runAdbTap(serial: string, x: int, y: int): bool {
@@ -1342,6 +1393,35 @@ QtObject {
         }
 
         root.adbDisplayInfoSerial = "";
+      } else if (commandKind === "screen-state") {
+        root.adbScreenStateRaw = stdoutText;
+
+        if (exitCode === 0) {
+          const interactiveMatch = stdoutText.match(/(?:^|\n)interactive=(true|false)/);
+          const lockedMatch = stdoutText.match(/(?:^|\n)locked=(true|false|unknown)/);
+          const unlockNeededMatch = stdoutText.match(/(?:^|\n)unlockNeeded=(true|false)/);
+
+          root.adbScreenInteractive = interactiveMatch ? interactiveMatch[1] === "true" : false;
+          root.adbScreenLockState = lockedMatch ? lockedMatch[1] : "unknown";
+          root.adbUnlockNeeded = unlockNeededMatch ? unlockNeededMatch[1] === "true" : true;
+          root.adbScreenStateKnownSerial = commandSerial;
+          root.adbScreenStateError = "";
+          root.adbScreenStateRefreshed(commandSerial, root.adbUnlockNeeded, root.adbScreenInteractive, root.adbScreenLockState);
+          Logger.i("KDEConnect", "ADB screen state:",
+            "serial=" + commandSerial,
+            "interactive=" + root.adbScreenInteractive,
+            "locked=" + root.adbScreenLockState,
+            "unlockNeeded=" + root.adbUnlockNeeded);
+        } else {
+          root.adbScreenStateKnownSerial = "";
+          root.adbScreenInteractive = false;
+          root.adbScreenLockState = "unknown";
+          root.adbUnlockNeeded = true;
+          root.adbScreenStateError = stderrText !== "" ? stderrText : ("adb screen state exited with code " + exitCode);
+          Logger.w("KDEConnect", "adb screen state failed:", root.adbScreenStateError);
+        }
+
+        root.adbScreenStateSerial = "";
       } else if (exitCode !== 0) {
         Logger.w("KDEConnect", "ADB input command failed:",
           "kind=" + commandKind,
@@ -1351,6 +1431,55 @@ QtObject {
       }
 
       root.finishCurrentAdbTask();
+    }
+  }
+
+  property Process scrcpyPreLaunchProc: Process {
+    id: scrcpyPreLaunchProc
+    running: false
+    command: root.buildScrcpyPreLaunchCommand(root.scrcpyActiveSerial, root.scrcpyFeedDevicePath)
+
+    stdout: StdioCollector {}
+
+    stderr: StdioCollector {
+      onStreamFinished: {
+        root.scrcpyLastStderr = text.trim();
+      }
+    }
+
+    onExited: (exitCode, exitStatus) => {
+      if (root.scrcpyStopRequested) {
+        root.scrcpyLaunching = false;
+        root.scrcpyStopRequested = false;
+        root.scrcpyCommandArgs = [];
+        root.scrcpyPendingCommandArgs = [];
+        root.scrcpyDeviceId = "";
+        root.scrcpyFeedDevicePath = "";
+        root.scrcpyActiveSerial = "";
+        root.scrcpyLaunchStartedAtMs = 0;
+        Logger.i("KDEConnect", "Stopped scrcpy launch before process start");
+        return;
+      }
+
+      if (exitCode !== 0) {
+        root.scrcpyLaunching = false;
+        root.scrcpyLaunchError = root.scrcpyLastStderr !== ""
+          ? root.scrcpyLastStderr
+          : ("scrcpy pre-launch failed with code " + exitCode);
+        root.scrcpyPendingCommandArgs = [];
+        Logger.e("KDEConnect", "scrcpy pre-launch failed:", root.scrcpyLaunchError);
+        return;
+      }
+
+      root.scrcpyCommandArgs = Array.isArray(root.scrcpyPendingCommandArgs)
+        ? root.scrcpyPendingCommandArgs
+        : [];
+      root.scrcpyPendingCommandArgs = [];
+      Logger.i("KDEConnect", "Launching scrcpy session:",
+        "deviceId=" + root.scrcpyDeviceId,
+        "serial=" + (root.isUsbSelectionSerial(root.scrcpyActiveSerial) ? "usb" : root.scrcpyActiveSerial),
+        "program=" + String(root.scrcpyCommandArgs[0] || ""));
+      root.scrcpySessionProc.running = true;
     }
   }
 
@@ -1400,6 +1529,7 @@ QtObject {
 
       root.scrcpyStopRequested = false;
       root.scrcpyCommandArgs = [];
+      root.scrcpyPendingCommandArgs = [];
       root.scrcpyDeviceId = "";
       root.scrcpyFeedDevicePath = "";
       root.scrcpyActiveSerial = "";
@@ -1407,6 +1537,13 @@ QtObject {
       root.adbScreenWidth = 0;
       root.adbScreenHeight = 0;
       root.adbScreenSerial = "";
+      root.adbScreenStateSerial = "";
+      root.adbScreenStateKnownSerial = "";
+      root.adbScreenStateRaw = "";
+      root.adbScreenStateError = "";
+      root.adbScreenLockState = "unknown";
+      root.adbScreenInteractive = false;
+      root.adbUnlockNeeded = true;
       root.adbDisplayInfoSerial = "";
       root.adbDisplayInfoStdout = "";
       root.adbDisplayInfoStderr = "";
