@@ -36,6 +36,8 @@ Rectangle {
     property bool mirrorFeedFrameLive: false
     property int mirrorFeedFrameCount: 0
     property bool mirrorFirstFrameLogged: false
+    property double scrcpyStartedAtMs: 0
+    property bool lastObservedFrameLive: false
     property var debugLogQueue: []
     property string debugAppendLine: ""
     readonly property string debugLogPath: "/tmp/androidconnect-preview-debug.log"
@@ -199,6 +201,26 @@ Rectangle {
         return "'" + String(value || "").replace(/'/g, "'\"'\"'") + "'";
     }
 
+    function msSinceScrcpy() {
+        const startedAt = Number(scrcpyStartedAtMs || 0);
+        if (startedAt <= 0)
+            return -1;
+
+        return Math.max(0, Math.round(Date.now() - startedAt));
+    }
+
+    function msSinceAttach() {
+        const attachedAt = Number(nativeAttachStartedAtMs || 0);
+        if (attachedAt <= 0)
+            return -1;
+
+        return Math.max(0, Math.round(Date.now() - attachedAt));
+    }
+
+    function timingSuffix() {
+        return " tSinceScrcpy=" + msSinceScrcpy() + " tSinceAttach=" + msSinceAttach();
+    }
+
     function debugLog(message) {
         const timestamp = new Date().toISOString();
         const line = timestamp + " " + String(message || "");
@@ -237,13 +259,12 @@ Rectangle {
         if (!mirrorFirstFrameLogged) {
             mirrorFirstFrameLogged = true;
             nativeZeroRectObserved = activeSourceRectSummary === "0x0";
-            debugLog("frame first sourceRect=" + activeSourceRectSummary);
+            debugLog("first frame sourceRect=" + activeSourceRectSummary + timingSuffix());
             if (nativeZeroRectObserved
                     && shouldActivateMirrorCamera
                     && !nativeZeroRectRecoveryScheduled
                     && nativeAttachRecoveryAttempts === 0) {
                 nativeZeroRectRecoveryScheduled = true;
-                debugLog("nativeZeroRectRecovery scheduled");
                 nativeZeroRectRecoveryTimer.restart();
             }
         }
@@ -256,8 +277,9 @@ Rectangle {
         nativeAttachStartedAtMs = Date.now();
         mirrorFeedAttachDelayActive = true;
         mirrorFeedAttachDelayTimer.restart();
-        if (String(reason || "").trim() !== "")
-            debugLog("nativeAttachWindow reason=" + String(reason || "") + " selectedInput=" + selectedVideoInputSummary);
+        debugLog("attach begin reason=" + String(reason || "unspecified")
+            + " selectedInput=" + selectedVideoInputSummary
+            + timingSuffix());
     }
 
     function scheduleNativeCameraRebind(reason) {
@@ -267,7 +289,7 @@ Rectangle {
         nativeCameraRebindPending = true;
         nativeZeroRectRecoveryScheduled = false;
         resetMirrorState();
-        debugLog("nativeCameraRebind reason=" + String(reason || ""));
+        debugLog("rebind reason=" + String(reason || "unspecified") + timingSuffix());
         nativeCameraRebindTimer.restart();
     }
 
@@ -286,9 +308,6 @@ Rectangle {
 
         mediaDevicesReloadDelayMs = Math.max(80, Math.round(Number(delayMs || 0)) || 80);
         mediaDevicesReloadPending = true;
-        debugLog("reloadMediaDevices delayMs=" + mediaDevicesReloadDelayMs
-            + " selectedInput=" + selectedVideoInputSummary
-            + " inputs=" + availableVideoInputsSummary);
         mediaDevicesLoader.active = false;
         mediaDevicesReloadCommitTimer.interval = mediaDevicesReloadDelayMs;
         mediaDevicesReloadCommitTimer.restart();
@@ -303,9 +322,8 @@ Rectangle {
         nativeAttachRecoveryAttempts = 0;
         nativeAttachStartedAtMs = 0;
         resetMirrorState();
-        debugLog("probeNativeLoopback selectedInput=" + selectedVideoInputSummary);
-        reloadMediaDevices(180);
-        nativeProbeRetryTimer.interval = 220;
+        reloadMediaDevices(80);
+        nativeProbeRetryTimer.interval = 120;
         nativeProbeRetryTimer.restart();
     }
 
@@ -334,10 +352,11 @@ Rectangle {
         nativeAttachStartedAtMs = 0;
         nativeAttachRecoveryAttempts = 0;
         mirrorFeedAttachDelayActive = mirrorFeedEnabled;
+        lastObservedFrameLive = false;
         resetMirrorState();
         debugLog("mirrorFeedEnabled=" + mirrorFeedEnabled
             + " devicePath=" + trimmedMirrorDevicePath
-            + " descriptionMatch=" + String(mirrorDeviceDescriptionMatch || ""));
+            + timingSuffix());
         if (mirrorFeedEnabled) {
             mirrorFeedAttachDelayTimer.restart();
         } else {
@@ -345,14 +364,11 @@ Rectangle {
         }
     }
 
-    onAvailableVideoInputsSummaryChanged: {
-        if (mirrorFeedEnabled)
-            debugLog("availableVideoInputs=" + availableVideoInputsSummary);
-    }
-
     onSelectedVideoInputSummaryChanged: {
         if (mirrorFeedEnabled)
-            debugLog("selectedInput=" + selectedVideoInputSummary + " available=" + mirrorFeedAvailable);
+            debugLog("selectedInput=" + selectedVideoInputSummary
+                + " available=" + mirrorFeedAvailable
+                + timingSuffix());
     }
 
     onMirrorFeedAvailableChanged: {
@@ -365,7 +381,6 @@ Rectangle {
                 nativeProbePending = false;
                 nativeProbeReady = true;
                 nativeProbeRetryCount = 0;
-                debugLog("nativeProbeReady=true selectedInput=" + selectedVideoInputSummary);
                 beginNativeAttachWindow("video-input-ready");
             }
             return;
@@ -374,14 +389,26 @@ Rectangle {
         nativeProbeReady = false;
         if (nativeProbePending && nativeProbeRetryCount < 6) {
             nativeProbeRetryCount += 1;
-            nativeProbeRetryTimer.interval = nativeProbeRetryCount <= 2 ? 160 : 280;
+            nativeProbeRetryTimer.interval = nativeProbeRetryCount <= 2 ? 100 : 180;
             nativeProbeRetryTimer.restart();
         }
     }
 
     onMirrorFeedErrorChanged: {
         if (mirrorFeedEnabled && String(mirrorFeedError || "").trim() !== "")
-            debugLog("mirrorFeedError=" + String(mirrorFeedError || ""));
+            debugLog("mirrorFeedError=" + String(mirrorFeedError || "") + timingSuffix());
+    }
+
+    onMirrorFeedFrameLiveChanged: {
+        if (lastObservedFrameLive && !mirrorFeedFrameLive) {
+            const lastDelta = mirrorFeedLastFrameAtMs > 0
+                ? Math.round(Date.now() - mirrorFeedLastFrameAtMs)
+                : -1;
+            debugLog("frameLive=false count=" + mirrorFeedFrameCount
+                + " dt=" + lastDelta
+                + timingSuffix());
+        }
+        lastObservedFrameLive = mirrorFeedFrameLive;
     }
 
     Loader {
@@ -406,15 +433,13 @@ Rectangle {
         onTriggered: {
             mediaDevicesLoader.active = true;
             phoneRoot.mediaDevicesReloadPending = false;
-            phoneRoot.debugLog("mediaDevicesReloadCommit selectedInput=" + phoneRoot.selectedVideoInputSummary
-                + " inputs=" + phoneRoot.availableVideoInputsSummary);
         }
     }
 
     Timer {
         id: mirrorFeedAttachDelayTimer
 
-        interval: 500
+        interval: 100
         repeat: false
         onTriggered: {
             phoneRoot.mirrorFeedAttachDelayActive = false;
@@ -424,15 +449,13 @@ Rectangle {
     Timer {
         id: nativeCameraRebindTimer
 
-        interval: 140
+        interval: 200
         repeat: false
         onTriggered: {
-            if (!phoneRoot.mirrorFeedEnabled || !phoneRoot.mirrorFeedAvailable) {
-                phoneRoot.nativeCameraRebindPending = false;
-                return;
-            }
-
             phoneRoot.nativeCameraRebindPending = false;
+            if (!phoneRoot.mirrorFeedEnabled || !phoneRoot.mirrorFeedAvailable)
+                return;
+
             phoneRoot.beginNativeAttachWindow("camera-rebind");
         }
     }
@@ -440,7 +463,7 @@ Rectangle {
     Timer {
         id: nativeZeroRectRecoveryTimer
 
-        interval: 180
+        interval: 200
         repeat: false
         onTriggered: {
             if (!phoneRoot.shouldActivateMirrorCamera
@@ -452,10 +475,6 @@ Rectangle {
             }
 
             phoneRoot.nativeAttachRecoveryAttempts = 1;
-            phoneRoot.debugLog("nativeAttachRecovery attempt=1 selectedInput="
-                + phoneRoot.selectedVideoInputSummary
-                + " sourceRect=" + phoneRoot.activeSourceRectSummary
-                + " fastPath=true");
             phoneRoot.scheduleNativeCameraRebind("zero-source-rect");
         }
     }
@@ -470,16 +489,14 @@ Rectangle {
             && !phoneRoot.mirrorFeedAvailable
             && !phoneRoot.mediaDevicesReloadPending
         onTriggered: {
-            phoneRoot.debugLog("mediaDevicesRetry selectedInput=" + phoneRoot.selectedVideoInputSummary
-                + " inputs=" + phoneRoot.availableVideoInputsSummary);
-            phoneRoot.reloadMediaDevices(220);
+            phoneRoot.reloadMediaDevices(120);
         }
     }
 
     Timer {
         id: nativeProbeRetryTimer
 
-        interval: 180
+        interval: 120
         repeat: false
         onTriggered: {
             if (!phoneRoot.mirrorFeedEnabled
@@ -488,8 +505,7 @@ Rectangle {
                     || phoneRoot.mediaDevicesReloadPending)
                 return;
 
-            phoneRoot.debugLog("nativeProbeRetry attempt=" + phoneRoot.nativeProbeRetryCount);
-            phoneRoot.reloadMediaDevices(phoneRoot.nativeProbeRetryCount <= 2 ? 180 : 260);
+            phoneRoot.reloadMediaDevices(phoneRoot.nativeProbeRetryCount <= 2 ? 100 : 180);
         }
     }
 
@@ -525,16 +541,14 @@ Rectangle {
 
             const attachAgeMs = Date.now() - phoneRoot.nativeAttachStartedAtMs;
             const recoveryDelayMs = phoneRoot.nativeZeroRectObserved ? 900 : 1400;
-            if (attachAgeMs < recoveryDelayMs)
-                return;
-
-            if (phoneRoot.nativeAttachRecoveryAttempts >= 2)
+            if (attachAgeMs < recoveryDelayMs || phoneRoot.nativeAttachRecoveryAttempts >= 2)
                 return;
 
             phoneRoot.nativeAttachRecoveryAttempts += 1;
-            phoneRoot.debugLog("nativeAttachRecovery attempt=" + phoneRoot.nativeAttachRecoveryAttempts
-                + " selectedInput=" + phoneRoot.selectedVideoInputSummary
-                + " sourceRect=" + phoneRoot.activeSourceRectSummary);
+            phoneRoot.debugLog("attach recovery attempt=" + phoneRoot.nativeAttachRecoveryAttempts
+                + " sourceRect=" + phoneRoot.activeSourceRectSummary
+                + " attachAgeMs=" + Math.round(attachAgeMs)
+                + phoneRoot.timingSuffix());
 
             if (phoneRoot.nativeAttachRecoveryAttempts === 1) {
                 phoneRoot.scheduleNativeCameraRebind("stalled-first-frame");
@@ -544,8 +558,8 @@ Rectangle {
             phoneRoot.nativeProbePending = true;
             phoneRoot.nativeProbeRetryCount = 0;
             phoneRoot.beginNativeAttachWindow("stalled-first-frame");
-            phoneRoot.reloadMediaDevices(220);
-            nativeProbeRetryTimer.interval = 220;
+            phoneRoot.reloadMediaDevices(120);
+            nativeProbeRetryTimer.interval = 120;
             nativeProbeRetryTimer.restart();
         }
     }
@@ -562,16 +576,23 @@ Rectangle {
 
         active: phoneRoot.shouldActivateMirrorCamera
         onActiveChanged: {
+            phoneRoot.debugLog("camera active=" + active + phoneRoot.timingSuffix());
             if (active) {
                 phoneRoot.resetMirrorState();
             } else {
                 phoneRoot.mirrorFeedFrameLive = false;
             }
         }
-        onCameraDeviceChanged: phoneRoot.resetMirrorState()
+        onCameraDeviceChanged: {
+            phoneRoot.resetMirrorState();
+        }
         onErrorOccurred: (error, errorString) => {
             phoneRoot.mirrorFeedFrameLive = false;
             phoneRoot.mirrorFeedError = phoneRoot.normalizeMirrorError(errorString !== "" ? errorString : ("camera error " + error));
+            phoneRoot.debugLog("camera error code=" + error
+                + " string=" + String(errorString || "")
+                + " normalized=" + phoneRoot.mirrorFeedError
+                + phoneRoot.timingSuffix());
         }
     }
 
@@ -595,18 +616,25 @@ Rectangle {
 
         running: false
         command: ["sh", "-lc",
-            ": > " + phoneRoot.shellQuote(phoneRoot.debugLogPath)
-            + "; printf '%s\\n' "
-            + phoneRoot.shellQuote("=== AndroidConnect preview debug session ===")
-            + " >> " + phoneRoot.shellQuote(phoneRoot.debugLogPath)
+            "log=" + phoneRoot.shellQuote(phoneRoot.debugLogPath) + "; "
+            + ": > \"$log\"; "
+            + "{ "
+            + "printf '=== AndroidConnect preview debug session ===\\n'; "
+            + "printf 'banner time=%s pid=%s\\n' \"$(date -Iseconds 2>/dev/null)\" \"$$\"; "
+            + "if command -v v4l2-ctl >/dev/null 2>&1; then "
+            + "  v4l2-ctl --list-devices 2>&1 | sed 's/^/banner   /'; "
+            + "  if [ -r /sys/module/v4l2loopback/parameters/exclusive_caps ]; then "
+            + "    printf 'banner v4l2loopback.exclusive_caps=%s\\n' \"$(cat /sys/module/v4l2loopback/parameters/exclusive_caps)\"; "
+            + "  fi; "
+            + "fi; "
+            + "} >> \"$log\" 2>&1"
         ]
 
         stdout: StdioCollector {}
         stderr: StdioCollector {}
 
         onExited: {
-            phoneRoot.debugLog("debugLogPath=" + phoneRoot.debugLogPath);
-            phoneRoot.debugLog("component completed devicePath=" + trimmedMirrorDevicePath
+            phoneRoot.debugLog("ready devicePath=" + trimmedMirrorDevicePath
                 + " descriptionMatch=" + String(mirrorDeviceDescriptionMatch || ""));
         }
     }
@@ -769,16 +797,16 @@ Rectangle {
                         visible: phoneRoot.shouldActivateMirrorCamera || parent.opacity > 0.001
                         fillMode: VideoOutput.Stretch
                         onSourceRectChanged: {
-                            if (sourceRect.width > 0 && sourceRect.height > 0) {
+                            const isZero = sourceRect.width <= 0 || sourceRect.height <= 0;
+                            if (!isZero) {
                                 phoneRoot.nativeAttachStartedAtMs = 0;
                                 phoneRoot.nativeZeroRectRecoveryScheduled = false;
-                                phoneRoot.debugLog("videoOutput sourceRect=" + activeSourceRectSummary);
+                                phoneRoot.debugLog("sourceRect=" + phoneRoot.activeSourceRectSummary + phoneRoot.timingSuffix());
                             } else if (phoneRoot.shouldActivateMirrorCamera
                                     && phoneRoot.nativeZeroRectObserved
                                     && !phoneRoot.nativeZeroRectRecoveryScheduled
                                     && phoneRoot.nativeAttachRecoveryAttempts === 0) {
                                 phoneRoot.nativeZeroRectRecoveryScheduled = true;
-                                phoneRoot.debugLog("nativeZeroRectRecovery scheduled");
                                 nativeZeroRectRecoveryTimer.restart();
                             }
                         }

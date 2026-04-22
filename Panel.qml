@@ -2275,6 +2275,7 @@ Item {
                           id: phonePreview
                           anchors.fill: parent
                           mirrorFeedEnabled: KDEConnect.scrcpyRunning
+                          scrcpyStartedAtMs: KDEConnect.scrcpyLaunchStartedAtMs
                           mirrorDeviceIdMatch: root.embeddedVideoDevice
                           mirrorDeviceDescriptionMatch: "scrcpy-panel"
                           mirrorContentWidth: KDEConnect.adbScreenWidth

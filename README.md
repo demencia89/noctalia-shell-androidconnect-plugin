@@ -30,7 +30,7 @@ Project repository:
 
 ## Current Status
 
-Current plugin version: `1.3.1`
+Current plugin version: `1.4.0`
 
 The embedded mirror uses a single live feed path:
 
@@ -39,7 +39,7 @@ The embedded mirror uses a single live feed path:
 - There is no second mirror backend in the normal path
 
 Current behavior:
-- Embedded mirror launches automatically when the panel is ready
+- Embedded mirror launches automatically when the panel is ready, typically within about one second of `scrcpy` starting
 - Audio can be toggled from the panel header
 - Android nav buttons stay visible below the phone preview
 - Screenshot and screen recording actions are available from the right-side utility row
@@ -47,7 +47,7 @@ Current behavior:
 - Status and error messages stay hidden during the initial grace period, then appear only if the feed or input path is still not ready
 - Opening the panel while `scrcpy` is already connected sends unlock-only, not Home
 - Header brand badges use logo assets where available and fall back to icons otherwise
-- Embedded mirror attach reliability is improved significantly versus `1.3.0`, but the native Qt attach bug is not fully eliminated yet
+- First-run cold-start reliability is fixed in `1.4.0`: the root cause was `v4l2loopback` advertising the scrcpy device as `V4L2_CAP_VIDEO_OUTPUT` at process start when created with `exclusive_caps=1`, which caused Qt Multimedia to filter it out and never re-enumerate. Using `exclusive_caps=0` on the scrcpy loopback resolves it
 
 ## Features
 
@@ -120,22 +120,43 @@ If you only want device status and KDE Connect actions:
 
 If you want the phone rendered inside the panel:
 
-1. Create a V4L2 loopback device.
-   Example:
+1. Create a V4L2 loopback device with **`exclusive_caps=0`**. This is required — see the note below.
+   Example for a one-shot modprobe:
 
 ```bash
 sudo modprobe -r v4l2loopback 2>/dev/null || true
 sudo modprobe v4l2loopback devices=1 video_nr=10 card_label=scrcpy-panel exclusive_caps=0 max_width=960 max_height=2160
 ```
 
-2. Make sure `/dev/video10` exists and `scrcpy-panel` is visible to Qt Multimedia.
-3. Open the panel and wait for the embedded mirror to start.
+To make it persist across reboots, add a config under `/etc/modprobe.d/`, for example `/etc/modprobe.d/v4l2loopback.conf`:
+
+```text
+options v4l2loopback video_nr=10 card_label="scrcpy-panel" exclusive_caps=0
+```
+
+If you already have other loopback devices (for example OBS's virtual camera), combine them into a single `options` line with comma-separated values per device, and make sure every entry in the `exclusive_caps` list is `0`:
+
+```text
+options v4l2loopback video_nr=0,10 card_label="OBS Virtual Camera,scrcpy-panel" exclusive_caps=0,0
+```
+
+After editing the config, reload the module:
+
+```bash
+sudo modprobe -r v4l2loopback && sudo modprobe v4l2loopback
+```
+
+2. Confirm `/dev/video10` exists and `scrcpy-panel` is visible to Qt Multimedia.
+3. Open the panel and wait for the embedded mirror to start. It should appear roughly one second after `scrcpy` launches.
 4. Use the speaker button in the header if you want embedded audio.
 
+### Why `exclusive_caps=0` is required
+
+With `exclusive_caps=1`, a `v4l2loopback` device advertises `V4L2_CAP_VIDEO_OUTPUT` when no consumer is attached and only flips to `V4L2_CAP_VIDEO_CAPTURE` once `scrcpy` starts writing. Qt Multimedia enumerates video-capture devices once at process startup and caches the result. If the panel opens before `scrcpy` writes, Qt sees the loopback as an output-only device, filters it out, and never re-enumerates it — the embedded mirror then stays black for the lifetime of the shell and no amount of panel reloading recovers it.
+
+With `exclusive_caps=0`, the loopback advertises both `CAPTURE` and `OUTPUT` unconditionally, so Qt enumerates it correctly at startup regardless of whether `scrcpy` has started yet. This is the only supported configuration.
+
 Notes:
-- The embedded mirror always uses the feed path.
-- If the feed is unavailable, verify that the loopback device exists, matches the configured label, and is not using `exclusive_caps=1`.
-- In practice, `exclusive_caps=0` is the expected working setup for `scrcpy` writing and the panel reading the same device.
 - If the phone is already mirrored when you open the plugin, AndroidConnect sends unlock-only and does not send Home.
 
 ## Panel Controls
@@ -206,26 +227,29 @@ If it fails:
 
 ## Known Issues
 
-- The embedded screen can sometimes remain black even when the rest of the plugin is working. `1.3.1` reduces how often this happens substantially, but it can still occur. Restarting the shell usually fixes it, and it should be needed much less often than before.
-- The embedded screen can sometimes appear glitchy or partially broken. Closing the plugin and opening it again usually fixes it. If not, restart the shell.
+- The embedded screen can occasionally appear glitchy or partially broken after a device mode change. Closing the plugin and opening it again usually fixes it. If not, restart the shell.
 
 ### Black Screen In The Embedded Mirror
 
-Check the following first:
+Most black-screen reports trace back to a `v4l2loopback` configuration issue. Check the following first:
 
 - `scrcpy`, `adb`, and Qt Multimedia are installed
 - `/dev/video10` exists
-- the loopback label is visible as `scrcpy-panel`
-- `v4l2loopback` was created with `exclusive_caps=0`
+- The loopback label is visible as `scrcpy-panel`
+- **`v4l2loopback` was created with `exclusive_caps=0`** — see the "Embedded Mirror Setup" section for why this matters and how to fix it
 
-Recommended checks:
+Quick diagnostic commands:
 
 ```bash
-v4l2-ctl --get-fmt-video -d /dev/video10
-v4l2-ctl --list-formats-ext -d /dev/video10
-cat /sys/devices/virtual/video4linux/video10/format
-cat /sys/module/v4l2loopback/parameters/exclusive_caps
+# Confirm the scrcpy-panel device is present and Qt-visible
+v4l2-ctl --list-devices
+cat /sys/module/v4l2loopback/parameters/exclusive_caps   # every entry should be "N"
+
+# Inspect the current format on the scrcpy loopback
+v4l2-ctl --device=/dev/video10 --all
 ```
+
+If any `exclusive_caps` entry is `Y`, follow the "Embedded Mirror Setup" steps to recreate the loopback devices with `exclusive_caps=0`.
 
 AndroidConnect also writes mirror diagnostics to:
 
@@ -233,9 +257,7 @@ AndroidConnect also writes mirror diagnostics to:
 /tmp/androidconnect-preview-debug.log
 ```
 
-### Loopback Format Notes
-
-The plugin expects a Qt-readable camera format from the loopback device. If the device exists but Qt still renders black, inspect the current loopback format and rebuild the loopback device if needed.
+The log starts with a banner showing the current `v4l2-ctl --list-devices` output and the module's `exclusive_caps` parameter, which is usually enough to diagnose loopback problems at a glance.
 
 ## Development Notes
 
