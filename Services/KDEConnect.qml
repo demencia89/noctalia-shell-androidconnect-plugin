@@ -400,6 +400,33 @@ QtObject {
     scrcpySessionProc.signal(15);
   }
 
+  function launchDetachedScrcpy(deviceSerial: string, commandString: string): bool {
+    const trimmedSerial = String(deviceSerial || "").trim();
+    if (trimmedSerial === "") {
+      Logger.w("KDEConnect", "Cannot launch detached scrcpy: no device serial");
+      return false;
+    }
+
+    const normalizedCmd = normalizeShellCommand(commandString);
+    if (normalizedCmd === "") {
+      Logger.w("KDEConnect", "Cannot launch detached scrcpy: empty command");
+      return false;
+    }
+
+    const parsedArgs = parseCommandArgs(normalizedCmd);
+    if (parsedArgs.error) {
+      Logger.w("KDEConnect", "Cannot launch detached scrcpy:", parsedArgs.error);
+      return false;
+    }
+
+    const commandArgs = ["scrcpy", "-s", trimmedSerial].concat(parsedArgs.args.slice(1));
+    detachedScrcpyProc.command = commandArgs;
+    detachedScrcpyProc.running = true;
+
+    Logger.i("KDEConnect", "Launching detached scrcpy:", trimmedSerial);
+    return true;
+  }
+
   function forceStopScrcpyProcesses(feedDevicePath: string): void {
     scrcpyCleanupFeedDevicePath = String(feedDevicePath || "").trim();
 
@@ -2135,6 +2162,27 @@ QtObject {
 
     onExited: (exitCode, exitStatus) => {
       root.scrcpyCleanupFeedDevicePath = "";
+    }
+  }
+
+  property Process detachedScrcpyProc: Process {
+    id: detachedScrcpyProc
+    running: false
+    command: ["scrcpy"]
+
+    stdout: StdioCollector {}
+
+    stderr: StdioCollector {
+      onStreamFinished: {
+        const stderrText = text.trim();
+        if (stderrText !== "")
+          Logger.w("KDEConnect", "detached scrcpy stderr:", stderrText);
+      }
+    }
+
+    onExited: (exitCode, exitStatus) => {
+      if (exitCode !== 0)
+        Logger.i("KDEConnect", "detached scrcpy exited with code:", exitCode);
     }
   }
 

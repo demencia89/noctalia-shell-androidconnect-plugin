@@ -56,6 +56,7 @@ Item {
   readonly property url xiaomiBrandBadgeSource: Qt.resolvedUrl("./Assets/brand-badges/xiaomi.svg")
   readonly property bool blurEnabled: true
   readonly property string embeddedMirrorCommand: "scrcpy --no-audio --capture-orientation=@0 --max-size=960 --max-fps=60 --video-bit-rate=12M --video-codec=h264 --v4l2-buffer=0"
+  readonly property string detachedMirrorCommand: "scrcpy --no-audio --capture-orientation=@0 --max-size=1920 --max-fps=60 --video-bit-rate=12M --video-codec=h264"
   readonly property bool reduceBackgroundRefreshWhileMirroring: true
   readonly property string embeddedVideoDevice: "/dev/video10"
   property string wirelessAdbPairHost: cfg.wirelessAdbPairHost ?? defaults.wirelessAdbPairHost ?? ""
@@ -1259,6 +1260,18 @@ Item {
     }
   }
 
+  function ensureDetachedMirrorSession() {
+    if (!scrcpyLaunchPrerequisitesReady())
+      return;
+
+    const serial = resolvedAdbSerial();
+    if (serial === "")
+      return;
+
+    Logger.i("KDEConnect", "Launching detached scrcpy window");
+    KDEConnect.launchDetachedScrcpy(serial, detachedMirrorCommand);
+  }
+
   function embeddedMirrorViewActive(preview) {
     return KDEConnect.scrcpyRunning
       && Boolean(preview?.mirrorDisplayVisible);
@@ -2234,6 +2247,15 @@ Item {
                             }
                             enabled: KDEConnect.daemonAvailable && multipleDevices
                             opacity: multipleDevices ? 1.0 : 0.0
+                          }
+
+                          PanelActionIconButton {
+                            icon: "maximize"
+                            tooltipText: root.trSafe("panel.detached-mirror.tooltip", "Open in window")
+                            onClicked: {
+                              root.ensureDetachedMirrorSession();
+                              pluginApi?.closePanel(screen, root);
+                            }
                           }
 
                           PanelActionIconButton {
