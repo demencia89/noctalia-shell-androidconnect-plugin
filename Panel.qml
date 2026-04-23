@@ -34,7 +34,7 @@ Item {
   readonly property color shellButtonFgColor: Color.mPrimary
   readonly property color shellButtonBgHoverColor: Color.mHover
   readonly property color shellButtonFgHoverColor: Color.mOnHover
-  readonly property color shellButtonBorderColor: Style.boxBorderColor
+  readonly property color shellButtonBorderColor: Color.mOutline
   readonly property color shellButtonBorderHoverColor: Color.mOutline
   readonly property color shellButtonActiveBgColor: Color.mPrimary
   readonly property color shellButtonActiveFgColor: Color.mOnPrimary
@@ -359,6 +359,7 @@ Item {
         root.wirelessAdbStatusMessage = body;
         KDEConnect.showNoticeWithHistory(root.trSafe("panel.wireless-adb.success-title", "Wireless ADB"), body, "wifi");
         root.scheduleTouchMappingRefresh();
+        wirelessAdbPopup.close();
       } else {
         const body = message === "missing_command"
           ? root.trSafe("panel.wireless-adb.missing-command-description", "Wireless ADB could not start the built-in adb tcpip helper.")
@@ -1919,6 +1920,53 @@ Item {
     colorBorderHover: active ? root.shellButtonActiveBorderColor : root.shellButtonBorderHoverColor
   }
 
+  component PanelActionIconButtonAnimated: NIconButton {
+    id: panelActionIconButtonAnimated
+
+    property bool active: false
+    property bool animatePulse: false
+
+    baseSize: Style.baseWidgetSize * 0.8
+    colorBg: active ? root.shellButtonActiveBgColor : root.shellButtonBgColor
+    colorFg: active ? root.shellButtonActiveFgColor : root.shellButtonFgColor
+    colorBgHover: active ? root.shellButtonActiveBgColor : root.shellButtonBgHoverColor
+    colorFgHover: active ? root.shellButtonActiveFgColor : root.shellButtonFgHoverColor
+    colorBorder: active ? root.shellButtonActiveBorderColor : root.shellButtonBorderColor
+    colorBorderHover: active ? root.shellButtonActiveBorderColor : root.shellButtonBorderHoverColor
+
+    SequentialAnimation on scale {
+      loops: Animation.Infinite
+      running: animatePulse && !active
+      PauseAnimation { duration: 1000 }
+      NumberAnimation {
+        from: 0.92; to: 1.08
+        duration: 350
+        easing.type: Easing.InOutQuad
+      }
+      NumberAnimation {
+        from: 1.08; to: 0.92
+        duration: 350
+        easing.type: Easing.InOutQuad
+      }
+    }
+
+    SequentialAnimation on opacity {
+      loops: Animation.Infinite
+      running: animatePulse && !active
+      PauseAnimation { duration: 1000 }
+      NumberAnimation {
+        from: 0.75; to: 1.0
+        duration: 350
+        easing.type: Easing.InOutQuad
+      }
+      NumberAnimation {
+        from: 1.0; to: 0.75
+        duration: 350
+        easing.type: Easing.InOutQuad
+      }
+    }
+  }
+
   component UtilityActionCard: NBox {
     id: utilityCard
 
@@ -2205,8 +2253,9 @@ Item {
                             onClicked: root.toggleEmbeddedMirrorAudioMode()
                           }
 
-                          PanelActionIconButton {
+                          PanelActionIconButtonAnimated {
                             icon: "wifi"
+                            animatePulse: !KDEConnect.adbHasUsbTransport && root.connectedWirelessAdbSerial() === ""
                             tooltipText: KDEConnect.wirelessAdbBusy
                               ? root.trSafe("panel.wireless-adb.busy-tooltip", "Wireless ADB command is running")
                               : root.trSafe("panel.wireless-adb.tooltip", "Open Wireless ADB tools")
@@ -3320,6 +3369,7 @@ Item {
           NIconButton {
             icon: "close"
             tooltipText: I18n.tr("common.close")
+            colorBorder: Color.mOutline
             onClicked: wirelessAdbPopup.close()
           }
         }
