@@ -379,13 +379,16 @@ Item {
     function onWirelessAdbFinished(success, message) {
       if (success) {
         const usedQrFlow = root.applyWirelessAdbQrSuccess(message);
+        const usedAutoConnectFlow = root.applyWirelessAdbAutoConnectSuccess(message);
         root.wirelessAdbSessionPreferred = true;
         KDEConnect.refreshAdbDevices();
         const body = usedQrFlow
           ? root.trSafe("panel.wireless-adb.qr-success-description", "Wireless ADB paired and connected from the QR code.")
-          : (message && message !== "ok"
-              ? message
-              : root.trSafe("panel.wireless-adb.success-description", "ADB over TCP/IP enabled"));
+          : usedAutoConnectFlow
+            ? root.trSafe("panel.wireless-adb.auto-connect-success-description", "Wireless ADB connected using the detected current port.")
+            : (message && message !== "ok"
+                ? message
+                : root.trSafe("panel.wireless-adb.success-description", "ADB over TCP/IP enabled"));
         root.wirelessAdbStatusMessage = body;
         KDEConnect.showNoticeWithHistory(root.trSafe("panel.wireless-adb.success-title", "Wireless ADB"), body, "wifi");
         root.scheduleTouchMappingRefresh();
@@ -397,6 +400,8 @@ Item {
             ? root.trSafe("panel.wireless-adb.missing-pair-parameters-description", "Enter the phone IP, pairing port, and pairing code")
             : message === "missing_connect_parameters"
               ? root.trSafe("panel.wireless-adb.missing-connect-parameters-description", "Enter the phone IP and connect port")
+              : message === "missing_connect_host"
+                ? root.trSafe("panel.wireless-adb.missing-connect-host-description", "Select a reachable KDE Connect phone first so the plugin knows which host to scan.")
               : message === "missing_qr_parameters"
                 ? root.trSafe("panel.wireless-adb.missing-qr-parameters-description", "Generate a fresh Wireless ADB QR code and try again.")
               : message;
@@ -1535,6 +1540,29 @@ Item {
     KDEConnect.connectWirelessAdb(host, port);
   }
 
+  function startWirelessAdbAutoConnect() {
+    const host = (wirelessAdbConnectHost || "").trim() !== ""
+      ? (wirelessAdbConnectHost || "").trim()
+      : ((wirelessAdbPairHost || "").trim() !== ""
+          ? (wirelessAdbPairHost || "").trim()
+          : selectedDevicePrimaryHost());
+
+    if (host === "") {
+      const body = trSafe("panel.wireless-adb.missing-connect-host-description", "Select a reachable KDE Connect phone first so the plugin knows which host to scan.");
+      wirelessAdbStatusMessage = body;
+      KDEConnect.showWarningWithHistory(trSafe("panel.wireless-adb.error-title", "Wireless ADB"), body, 5000);
+      return;
+    }
+
+    wirelessAdbPairHost = host;
+    wirelessAdbConnectHost = host;
+    wirelessAdbConnectPort = "";
+    wirelessAdbStatusMessage = trSafe("panel.wireless-adb.auto-connect-running-description", "Scanning for the selected phone's current Wireless ADB port...");
+    wirelessAdbSessionPreferred = true;
+    persistWirelessAdbSettings();
+    KDEConnect.autoConnectWirelessAdb(host, 18);
+  }
+
   function beginWirelessAdbQrPairing() {
     if (KDEConnect.wirelessAdbBusy || wirelessAdbQrEncodeProc.running)
       return;
@@ -1558,6 +1586,18 @@ Item {
     wirelessAdbConnectHost = match[1];
     wirelessAdbPairPort = match[2];
     wirelessAdbConnectPort = match[3];
+    persistWirelessAdbSettings();
+    return true;
+  }
+
+  function applyWirelessAdbAutoConnectSuccess(message) {
+    const match = String(message || "").match(/^AUTO_CONNECT_OK\s+host=(\S+)\s+connect_port=(\d+)/);
+    if (!match)
+      return false;
+
+    wirelessAdbPairHost = match[1];
+    wirelessAdbConnectHost = match[1];
+    wirelessAdbConnectPort = match[2];
     persistWirelessAdbSettings();
     return true;
   }
@@ -4291,6 +4331,14 @@ Item {
                 Layout.fillWidth: true
                 visible: text !== ""
                 elide: Text.ElideRight
+              }
+
+              NButton {
+                text: root.trSafe("panel.wireless-adb.auto-connect-button", "Auto-detect")
+                icon: "wifi"
+                enabled: !KDEConnect.wirelessAdbBusy
+                  && (((root.wirelessAdbConnectHost || "").trim() !== "") || ((root.wirelessAdbPairHost || "").trim() !== ""))
+                onClicked: root.startWirelessAdbAutoConnect()
               }
 
               NButton {
