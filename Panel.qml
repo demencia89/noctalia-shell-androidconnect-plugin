@@ -56,7 +56,7 @@ Item {
   readonly property url xiaomiBrandBadgeSource: Qt.resolvedUrl("./Assets/brand-badges/xiaomi.svg")
   readonly property bool blurEnabled: true
   readonly property string embeddedMirrorCommand: "scrcpy --no-audio --capture-orientation=@0 --max-size=960 --max-fps=60 --video-bit-rate=12M --video-codec=h264 --v4l2-buffer=0"
-  readonly property string detachedMirrorCommand: "scrcpy --no-audio --capture-orientation=@0 --max-size=1920 --max-fps=60 --video-bit-rate=12M --video-codec=h264"
+  readonly property string detachedMirrorCommand: "scrcpy --no-audio --max-size=1920 --max-fps=60 --video-bit-rate=12M --video-codec=h264"
   readonly property bool reduceBackgroundRefreshWhileMirroring: true
   readonly property string embeddedVideoDevice: "/dev/video10"
   property string wirelessAdbPairHost: cfg.wirelessAdbPairHost ?? defaults.wirelessAdbPairHost ?? ""
@@ -71,6 +71,10 @@ Item {
   property bool wirelessAdbQrPendingLaunch: false
   property int wirelessAdbQrImageVersion: 0
   property bool wirelessAdbSessionPreferred: false
+  property bool silentWirelessAdbAutoConnectPending: false
+  property bool silentWirelessAdbAutoConnectRefreshPending: false
+  property string silentWirelessAdbAutoConnectKey: ""
+  property var silentWirelessAdbAutoConnectAttempts: ({})
   property bool lastKnownUsbTransport: false
   property var cachedDeviceTelemetry: initialCachedDeviceTelemetry()
   readonly property string tempInstanceToken: makeTempInstanceToken()
@@ -134,6 +138,15 @@ Item {
     repeat: false
     onTriggered: {
       root.attemptEmbeddedMirrorAutoStart();
+    }
+  }
+
+  Timer {
+    id: silentWirelessAdbAutoConnectTimer
+    interval: 180
+    repeat: false
+    onTriggered: {
+      root.attemptSilentWirelessAdbAutoConnect();
     }
   }
 
@@ -313,8 +326,15 @@ Item {
       if (root.visible && root.panelOpenUnlockPending && KDEConnect.scrcpyRunning)
         root.refreshPanelOpenUnlockState();
 
+      if (root.silentWirelessAdbAutoConnectRefreshPending
+          && !KDEConnect.wirelessAdbBusy) {
+        root.clearSilentWirelessAdbAutoConnectState();
+      }
+
       if (!KDEConnect.scrcpyRunning && !KDEConnect.scrcpyLaunching)
         root.scheduleEmbeddedMirrorAutoStart();
+
+      root.scheduleSilentWirelessAdbAutoConnect();
     }
 
     function onDevicesChanged() {
@@ -323,6 +343,7 @@ Item {
         root.updateCachedTelemetryForDevice(devices[i]);
 
       root.scheduleEmbeddedMirrorAutoStart();
+      root.scheduleSilentWirelessAdbAutoConnect();
     }
 
     function onMainDeviceChanged() {
@@ -350,6 +371,7 @@ Item {
         root.loadWirelessAdbProfileForSelectedDevice(true);
 
       root.scheduleEmbeddedMirrorAutoStart();
+      root.scheduleSilentWirelessAdbAutoConnect();
     }
 
     function onScrcpyLaunchErrorChanged() {
@@ -377,10 +399,14 @@ Item {
     }
 
     function onWirelessAdbFinished(success, message) {
+      const silentAutoConnect = root.silentWirelessAdbAutoConnectPending;
+      const silentAutoConnectStillSelected = !silentAutoConnect
+        || root.silentWirelessAdbAutoConnectKey === root.selectedWirelessAdbAutoConnectKey();
       if (success) {
-        const usedQrFlow = root.applyWirelessAdbQrSuccess(message);
-        const usedAutoConnectFlow = root.applyWirelessAdbAutoConnectSuccess(message);
-        root.wirelessAdbSessionPreferred = true;
+        const usedQrFlow = silentAutoConnectStillSelected ? root.applyWirelessAdbQrSuccess(message) : false;
+        const usedAutoConnectFlow = silentAutoConnectStillSelected ? root.applyWirelessAdbAutoConnectSuccess(message) : false;
+        if (silentAutoConnectStillSelected)
+          root.wirelessAdbSessionPreferred = true;
         KDEConnect.refreshAdbDevices();
         const body = usedQrFlow
           ? root.trSafe("panel.wireless-adb.qr-success-description", "Wireless ADB paired and connected from the QR code.")
@@ -389,10 +415,13 @@ Item {
             : (message && message !== "ok"
                 ? message
                 : root.trSafe("panel.wireless-adb.success-description", "ADB over TCP/IP enabled"));
-        root.wirelessAdbStatusMessage = body;
-        KDEConnect.showNoticeWithHistory(root.trSafe("panel.wireless-adb.success-title", "Wireless ADB"), body, "wifi");
+        if (!silentAutoConnect) {
+          root.wirelessAdbStatusMessage = body;
+          KDEConnect.showNoticeWithHistory(root.trSafe("panel.wireless-adb.success-title", "Wireless ADB"), body, "wifi");
+        }
         root.scheduleTouchMappingRefresh();
-        wirelessAdbPopup.close();
+        if (silentAutoConnectStillSelected && wirelessAdbPopup.opened)
+          wirelessAdbPopup.close();
       } else {
         const body = message === "missing_command"
           ? root.trSafe("panel.wireless-adb.missing-command-description", "Wireless ADB could not start the built-in adb tcpip helper.")
@@ -405,8 +434,19 @@ Item {
               : message === "missing_qr_parameters"
                 ? root.trSafe("panel.wireless-adb.missing-qr-parameters-description", "Generate a fresh Wireless ADB QR code and try again.")
               : message;
-        root.wirelessAdbStatusMessage = body;
-        KDEConnect.showWarningWithHistory(root.trSafe("panel.wireless-adb.error-title", "Wireless ADB"), body, 5000);
+        if (!silentAutoConnect || wirelessAdbPopup.opened) {
+          root.wirelessAdbStatusMessage = body;
+          KDEConnect.showWarningWithHistory(root.trSafe("panel.wireless-adb.error-title", "Wireless ADB"), body, 5000);
+        }
+      }
+
+      if (silentAutoConnect) {
+        if (success && silentAutoConnectStillSelected) {
+          root.silentWirelessAdbAutoConnectRefreshPending = true;
+          root.scheduleEmbeddedMirrorAutoStart();
+        } else {
+          root.clearSilentWirelessAdbAutoConnectState();
+        }
       }
     }
 
@@ -459,6 +499,7 @@ Item {
     root.restoreKeepScreenOnState();
     KDEConnect.reduceBackgroundRefresh = false;
     embeddedMirrorAutoStartTimer.stop();
+    silentWirelessAdbAutoConnectTimer.stop();
     embeddedMirrorWarmStopTimer.stop();
     panelOpenUnlockTimer.stop();
     root.clearPanelOpenUnlockState();
@@ -484,6 +525,7 @@ Item {
       if (KDEConnect.scrcpyRunning)
         embeddedMirrorFormatLockTimer.restart();
       root.scheduleEmbeddedMirrorAutoStart();
+      root.scheduleSilentWirelessAdbAutoConnect();
     }
     if (!visible) {
       root.restoreDimScreenState();
@@ -491,6 +533,7 @@ Item {
       root.panelVisibleSinceMs = 0;
       root.panelStatusGraceElapsed = true;
       embeddedMirrorAutoStartTimer.stop();
+      silentWirelessAdbAutoConnectTimer.stop();
       embeddedMirrorFormatLockTimer.stop();
       panelStatusGraceTimer.stop();
       panelOpenUnlockTimer.stop();
@@ -619,6 +662,13 @@ Item {
         icon: "device-mobile",
         title: root.trSafe("panel.diagnostics.adb-title", "ADB input and mirroring"),
         body: root.trSafe("panel.diagnostics.adb-waiting-body", "Waiting for KDE Connect reachability before checking ADB controls."),
+        severity: "waiting"
+      });
+    } else if (root.silentWirelessAdbAutoConnectSuppressed()) {
+      entries.push({
+        icon: "wifi",
+        title: root.trSafe("panel.diagnostics.adb-title", "ADB input and mirroring"),
+        body: root.trSafe("panel.wireless-adb.auto-connect-running-description", "Scanning for the selected phone's current Wireless ADB port..."),
         severity: "waiting"
       });
     } else if ((adbIssueTitle || "").trim() !== "") {
@@ -765,6 +815,9 @@ Item {
       );
     }
 
+    if (root.silentWirelessAdbAutoConnectSuppressed())
+      return "2. " + root.trSafe("panel.wireless-adb.auto-connect-running-description", "Scanning for the selected phone's current Wireless ADB port...");
+
     const adbIssueSubtitle = root.adbSetupIssueSubtitle();
     if ((adbIssueSubtitle || "").trim() !== "")
       return "2. " + adbIssueSubtitle;
@@ -840,6 +893,99 @@ Item {
     }
 
     embeddedMirrorAutoStartTimer.restart();
+  }
+
+  function selectedWirelessAdbAutoConnectKey() {
+    const deviceId = selectedDeviceId();
+    const host = selectedDevicePrimaryHost();
+    if (deviceId === "" || host === "")
+      return "";
+
+    return deviceId + "|" + host;
+  }
+
+  function silentWirelessAdbAutoConnectInFlight() {
+    return silentWirelessAdbAutoConnectPending
+      || (KDEConnect.wirelessAdbBusy && silentWirelessAdbAutoConnectKey !== "");
+  }
+
+  function clearSilentWirelessAdbAutoConnectState() {
+    silentWirelessAdbAutoConnectPending = false;
+    silentWirelessAdbAutoConnectRefreshPending = false;
+    silentWirelessAdbAutoConnectKey = "";
+  }
+
+  function selectedDeviceMissingAdb() {
+    return root.mainDeviceSetupComplete()
+      && KDEConnect.adbDevicesExitCode === 0
+      && adbSerialsInStateForSelectedDevice("unauthorized").length === 0
+      && adbSerialsInStateForSelectedDevice("offline").length === 0
+      && resolvedAdbSerial() === "";
+  }
+
+  function silentWirelessAdbAutoConnectSuppressed() {
+    const key = selectedWirelessAdbAutoConnectKey();
+    const activeSilentMatchesSelection = silentWirelessAdbAutoConnectKey === ""
+      || silentWirelessAdbAutoConnectKey === key;
+
+    return selectedDeviceMissingAdb()
+      && key !== ""
+      && (shouldSilentWirelessAdbAutoConnect()
+          || (activeSilentMatchesSelection
+              && (silentWirelessAdbAutoConnectTimer.running
+                  || silentWirelessAdbAutoConnectInFlight())));
+  }
+
+  function shouldSilentWirelessAdbAutoConnect() {
+    const key = selectedWirelessAdbAutoConnectKey();
+    if (key === "")
+      return false;
+
+    if (!root.visible
+        || !embeddedMirrorModeEnabled()
+        || !root.mainDeviceSetupComplete()
+        || KDEConnect.adbDevicesExitCode !== 0
+        || KDEConnect.scrcpyRunning
+        || KDEConnect.scrcpyLaunching
+        || KDEConnect.wirelessAdbBusy
+        || wirelessAdbPopup.opened
+        || resolvedAdbSerial() !== "")
+      return false;
+
+    return !Boolean((silentWirelessAdbAutoConnectAttempts || ({}))[key]);
+  }
+
+  function scheduleSilentWirelessAdbAutoConnect() {
+    if (!shouldSilentWirelessAdbAutoConnect())
+      return;
+
+    silentWirelessAdbAutoConnectTimer.restart();
+  }
+
+  function attemptSilentWirelessAdbAutoConnect() {
+    if (!shouldSilentWirelessAdbAutoConnect())
+      return;
+
+    const key = selectedWirelessAdbAutoConnectKey();
+    const host = selectedDevicePrimaryHost();
+    const attempts = Object.assign({}, silentWirelessAdbAutoConnectAttempts || ({}));
+    attempts[key] = Date.now();
+    silentWirelessAdbAutoConnectAttempts = attempts;
+    silentWirelessAdbAutoConnectKey = key;
+    silentWirelessAdbAutoConnectPending = true;
+    wirelessAdbSessionPreferred = true;
+    wirelessAdbPairHost = host;
+    wirelessAdbConnectHost = host;
+    wirelessAdbConnectPort = "";
+    saveWirelessAdbDeviceProfile({ host: host });
+    Logger.i("KDEConnect", "Trying silent Wireless ADB auto-detect for selected device:", host);
+    const started = KDEConnect.autoConnectWirelessAdb(host, 12);
+    if (!started) {
+      const resetAttempts = Object.assign({}, silentWirelessAdbAutoConnectAttempts || ({}));
+      delete resetAttempts[key];
+      silentWirelessAdbAutoConnectAttempts = resetAttempts;
+      clearSilentWirelessAdbAutoConnectState();
+    }
   }
 
   function attemptEmbeddedMirrorAutoStart() {
@@ -1096,7 +1242,7 @@ Item {
     return selectedDeviceWirelessAdbSerial();
   }
 
-  function adbSetupIssueTitle() {
+  function adbBlockingIssueTitle() {
     if (!root.mainDeviceSetupComplete())
       return "";
 
@@ -1118,6 +1264,13 @@ Item {
       return trSafe("panel.scrcpy.adb-setup-title", "Connect ADB First");
 
     return "";
+  }
+
+  function adbSetupIssueTitle() {
+    if (root.silentWirelessAdbAutoConnectSuppressed())
+      return "";
+
+    return adbBlockingIssueTitle();
   }
 
   function adbSetupIssueSubtitle() {
@@ -1145,7 +1298,7 @@ Item {
   }
 
   function scrcpyLaunchPrerequisitesReady() {
-    if ((adbSetupIssueTitle() || "").trim() !== "")
+    if ((adbBlockingIssueTitle() || "").trim() !== "")
       return false;
 
     if (embeddedMirrorModeEnabled()) {
