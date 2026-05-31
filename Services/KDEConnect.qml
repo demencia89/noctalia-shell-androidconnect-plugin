@@ -16,6 +16,7 @@ QtObject {
   property list<var> pendingDevices: []
   property bool deviceRefreshInProgress: false
   property int deviceRefreshGeneration: 0
+  property double deviceLastRefreshAtMs: 0
   property var pairedStateGraceTimestamps: ({})
   readonly property int pairedStateGraceMs: 45000
 
@@ -41,6 +42,7 @@ QtObject {
   property string adbDevicesStdout: ""
   property string adbDevicesStderr: ""
   property int adbDevicesExitCode: 0
+  property double adbDevicesLastRefreshAtMs: 0
   property var adbDeviceStates: ({})
   property var adbConnectedSerials: []
   property bool adbHasUsbTransport: false
@@ -99,7 +101,7 @@ QtObject {
   signal adbScreenBrightnessRead(string serial, string mode, string value, bool success)
 
   onDevicesChanged: {
-    setMainDevice(root.mainDeviceId)
+    updateMainDevice(true)
   }
 
   Component.onCompleted: {
@@ -129,6 +131,11 @@ QtObject {
 
   function setMainDevice(deviceId: string): void {
     root.mainDeviceId = deviceId;
+    updateMainDevice(true);
+  }
+
+  function setMainDeviceExact(deviceId: string): void {
+    root.mainDeviceId = deviceId;
     updateMainDevice(false);
   }
 
@@ -149,6 +156,9 @@ QtObject {
     if (root.mainDevice !== newMain) {
       root.mainDevice = newMain;
     }
+
+    if (newMain !== null && newMain !== undefined)
+      root.mainDeviceId = newMain.id;
 
     anyDevicesConnected = devices.find((device) => device.reachable) !== undefined;
   }
@@ -894,12 +904,18 @@ QtObject {
   }
 
   function queueAdbTask(kind: string, serial: string, args): bool {
+    const trimmedSerial = String(serial || "").trim();
+    if (trimmedSerial === "") {
+      Logger.w("KDEConnect", "Skipping ADB task without a selected device serial:", String(kind || "").trim());
+      return false;
+    }
+
     const normalizedArgs = args.map(arg => String(arg));
     const queuedTasks = (adbCommandQueue || []).slice(0);
 
     queuedTasks.push({
       kind: String(kind || "").trim(),
-      serial: String(serial || "").trim(),
+      serial: trimmedSerial,
       args: normalizedArgs
     });
     adbCommandQueue = queuedTasks;
@@ -1332,6 +1348,7 @@ QtObject {
         if (normalizedDeviceIds.length === 0) {
           root.deviceRefreshInProgress = false;
           root.devices = [];
+          root.deviceLastRefreshAtMs = Date.now();
           root.updateMainDevice(true);
           return;
         }
@@ -1367,6 +1384,8 @@ QtObject {
         paired: false,
         pairRequested: false,
         verificationKey: "",
+        activeProviderNames: [],
+        reachableAddresses: [],
         charging: false,
         battery: -1,
         cellularNetworkType: "",
@@ -1395,6 +1414,30 @@ QtObject {
         stdout: StdioCollector {
           onStreamFinished: {
             loader.deviceData.reachable = busctlData(text);
+
+            activeProviderNamesProc.running = true;
+          }
+        }
+      }
+
+      property Process activeProviderNamesProc: Process {
+        command: busctlGet("/modules/kdeconnect/devices/" + loader.deviceId, "org.kde.kdeconnect.device", "activeProviderNames")
+        stdout: StdioCollector {
+          onStreamFinished: {
+            const providerNames = busctlData(text);
+            loader.deviceData.activeProviderNames = Array.isArray(providerNames) ? providerNames : [];
+
+            reachableAddressesProc.running = true;
+          }
+        }
+      }
+
+      property Process reachableAddressesProc: Process {
+        command: busctlGet("/modules/kdeconnect/devices/" + loader.deviceId, "org.kde.kdeconnect.device", "reachableAddresses")
+        stdout: StdioCollector {
+          onStreamFinished: {
+            const addresses = busctlData(text);
+            loader.deviceData.reachableAddresses = Array.isArray(addresses) ? addresses : [];
 
             pairingRequestedProc.running = true;
           }
@@ -1527,6 +1570,16 @@ QtObject {
           loader.deviceData.cellularNetworkType = previousDevice.cellularNetworkType;
         }
 
+        if (loader.deviceData.activeProviderNames.length === 0
+            && Array.isArray(previousDevice.activeProviderNames)) {
+          loader.deviceData.activeProviderNames = previousDevice.activeProviderNames.slice(0);
+        }
+
+        if (loader.deviceData.reachableAddresses.length === 0
+            && Array.isArray(previousDevice.reachableAddresses)) {
+          loader.deviceData.reachableAddresses = previousDevice.reachableAddresses.slice(0);
+        }
+
         if (Number(loader.deviceData.cellularNetworkStrength) < 0
             && Number(previousDevice.cellularNetworkStrength) >= 0) {
           loader.deviceData.cellularNetworkStrength = previousDevice.cellularNetworkStrength;
@@ -1567,6 +1620,7 @@ QtObject {
           root.devices = newDevices
           root.pendingDevices = []
           root.deviceRefreshInProgress = false;
+          root.deviceLastRefreshAtMs = Date.now();
           updateMainDevice(deviceNotReachableAnymore);
         }
 
@@ -2268,6 +2322,7 @@ QtObject {
       }
 
       root.adbDevicesExitCode = exitCode;
+      root.adbDevicesLastRefreshAtMs = Date.now();
       root.adbDeviceStates = deviceStates;
       root.adbConnectedSerials = connectedSerials;
       root.adbHasUsbTransport = hasUsbTransport;
