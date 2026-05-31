@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.5.1
+
+- Silently try Wireless ADB mDNS auto-detect once for a selected KDE Connect phone before showing the ADB missing state.
+- Keep the embedded panel mirror orientation locked while allowing detached scrcpy windows to follow device rotation.
+
 ## v1.5.0
 
 - Tie embedded `scrcpy` sessions to the selected KDE Connect device so the panel does not show another phone's mirror.

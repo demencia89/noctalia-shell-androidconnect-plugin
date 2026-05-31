@@ -30,7 +30,7 @@ Project repository:
 
 ## Current Status
 
-Current plugin version: `1.5.0`
+Current plugin version: `1.5.1`
 
 See `CHANGELOG.md` for release notes.
 
