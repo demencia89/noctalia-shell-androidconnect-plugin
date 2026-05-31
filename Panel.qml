@@ -64,6 +64,7 @@ Item {
   property string wirelessAdbPairingCode: ""
   property string wirelessAdbConnectHost: cfg.wirelessAdbConnectHost ?? defaults.wirelessAdbConnectHost ?? ""
   property string wirelessAdbConnectPort: cfg.wirelessAdbConnectPort ?? defaults.wirelessAdbConnectPort ?? ""
+  property var wirelessAdbDeviceProfiles: initialWirelessAdbDeviceProfiles()
   property string wirelessAdbStatusMessage: ""
   property string wirelessAdbQrInstanceName: ""
   property string wirelessAdbQrSecret: ""
@@ -344,6 +345,9 @@ Item {
         Logger.i("KDEConnect", "Selected KDE Connect device changed, stopping embedded feed session");
         KDEConnect.stopScrcpySession();
       }
+
+      if (wirelessAdbPopup.opened)
+        root.loadWirelessAdbProfileForSelectedDevice(true);
 
       root.scheduleEmbeddedMirrorAutoStart();
     }
@@ -1286,6 +1290,119 @@ Item {
       + randomTokenFromAlphabet(8, "abcdefghijklmnopqrstuvwxyz0123456789");
   }
 
+  function initialWirelessAdbDeviceProfiles() {
+    const rawValue = cfg.wirelessAdbDevices ?? defaults.wirelessAdbDevices ?? ({});
+    const profiles = ({});
+    if (!rawValue || typeof rawValue !== "object" || Array.isArray(rawValue))
+      return profiles;
+
+    for (const deviceId in rawValue) {
+      if (!Object.prototype.hasOwnProperty.call(rawValue, deviceId))
+        continue;
+
+      const normalizedDeviceId = String(deviceId || "").trim();
+      if (normalizedDeviceId === "")
+        continue;
+
+      const profile = normalizedWirelessAdbProfile(rawValue[deviceId]);
+      if (profile !== null)
+        profiles[normalizedDeviceId] = profile;
+    }
+
+    return profiles;
+  }
+
+  function normalizedWirelessAdbProfile(rawProfile) {
+    if (!rawProfile || typeof rawProfile !== "object" || Array.isArray(rawProfile))
+      return null;
+
+    const profile = ({});
+    const host = String(rawProfile.host || "").trim();
+    const lastPairPort = String(rawProfile.lastPairPort || "").trim();
+    const lastConnectPort = String(rawProfile.lastConnectPort || "").trim();
+    const lastSerial = String(rawProfile.lastSerial || "").trim();
+    const updatedAt = Number(rawProfile.updatedAt || 0);
+
+    if (host !== "")
+      profile.host = host;
+    if (lastPairPort !== "")
+      profile.lastPairPort = lastPairPort;
+    if (lastConnectPort !== "")
+      profile.lastConnectPort = lastConnectPort;
+    if (lastSerial !== "")
+      profile.lastSerial = lastSerial;
+    if (isFinite(updatedAt) && updatedAt > 0)
+      profile.updatedAt = updatedAt;
+
+    return Object.keys(profile).length > 0 ? profile : null;
+  }
+
+  function selectedDeviceId() {
+    return String(KDEConnect.mainDevice?.id || "").trim();
+  }
+
+  function selectedWirelessAdbProfile() {
+    const deviceId = selectedDeviceId();
+    if (deviceId === "")
+      return ({});
+
+    const profile = (wirelessAdbDeviceProfiles || ({}))[deviceId];
+    return profile && typeof profile === "object" && !Array.isArray(profile)
+      ? profile
+      : ({});
+  }
+
+  function saveWirelessAdbDeviceProfile(patch) {
+    if (!pluginApi)
+      return;
+
+    const deviceId = selectedDeviceId();
+    if (deviceId === "")
+      return;
+
+    const cleanPatch = normalizedWirelessAdbProfile(patch);
+    if (cleanPatch === null)
+      return;
+
+    const profiles = Object.assign({}, wirelessAdbDeviceProfiles || ({}));
+    const currentProfile = profiles[deviceId] && typeof profiles[deviceId] === "object"
+      ? profiles[deviceId]
+      : ({});
+    profiles[deviceId] = Object.assign({}, currentProfile, cleanPatch, {
+      updatedAt: Date.now()
+    });
+    wirelessAdbDeviceProfiles = profiles;
+    pluginApi.pluginSettings.wirelessAdbDevices = profiles;
+  }
+
+  function currentWirelessAdbProfilePatch(includePorts) {
+    const host = (wirelessAdbConnectHost || "").trim() !== ""
+      ? (wirelessAdbConnectHost || "").trim()
+      : (wirelessAdbPairHost || "").trim();
+    const patch = ({});
+
+    if (host !== "")
+      patch.host = host;
+
+    if (includePorts) {
+      const pairPort = (wirelessAdbPairPort || "").trim();
+      const connectPort = (wirelessAdbConnectPort || "").trim();
+      if (pairPort !== "")
+        patch.lastPairPort = pairPort;
+      if (connectPort !== "") {
+        patch.lastConnectPort = connectPort;
+        if (host !== "")
+          patch.lastSerial = host + ":" + connectPort;
+      }
+    }
+
+    const connectedSerial = KDEConnect.adbConnectedSerialForHost(host);
+    if (connectedSerial !== "")
+      patch.lastSerial = connectedSerial;
+
+    return patch;
+  }
+
   function escapeWirelessAdbQrValue(value) {
     return String(value || "").replace(/([\\;,:])/g, "\\$1");
   }
@@ -1312,6 +1429,7 @@ Item {
     if (!pluginApi)
       return;
 
+    saveWirelessAdbDeviceProfile(currentWirelessAdbProfilePatch(true));
     pluginApi.pluginSettings.wirelessAdbPairHost = (wirelessAdbPairHost || "").trim();
     pluginApi.pluginSettings.wirelessAdbPairPort = (wirelessAdbPairPort || "").trim();
     pluginApi.pluginSettings.wirelessAdbConnectHost = (wirelessAdbConnectHost || "").trim();
@@ -1319,14 +1437,54 @@ Item {
     pluginApi.saveSettings();
   }
 
-  function openWirelessAdbDialog() {
+  function loadWirelessAdbProfileForSelectedDevice(clearVolatilePorts) {
+    const deviceId = selectedDeviceId();
     const selectedHost = selectedDevicePrimaryHost();
-    if (selectedHost !== "") {
-      if ((wirelessAdbPairHost || "").trim() === "" || !hostBelongsToSelectedDevice(wirelessAdbPairHost))
-        wirelessAdbPairHost = selectedHost;
-      if ((wirelessAdbConnectHost || "").trim() === "" || !hostBelongsToSelectedDevice(wirelessAdbConnectHost))
-        wirelessAdbConnectHost = selectedHost;
+    const profile = selectedWirelessAdbProfile();
+    const profileHost = String(profile.host || "").trim();
+    const legacyHost = (wirelessAdbConnectHost || "").trim() !== ""
+      ? (wirelessAdbConnectHost || "").trim()
+      : (wirelessAdbPairHost || "").trim();
+    const host = selectedHost !== ""
+      ? selectedHost
+      : (profileHost !== "" ? profileHost : (deviceId === "" ? legacyHost : ""));
+
+    if (host !== "") {
+      wirelessAdbPairHost = host;
+      wirelessAdbConnectHost = host;
+    } else if (deviceId !== "") {
+      wirelessAdbPairHost = "";
+      wirelessAdbConnectHost = "";
     }
+
+    if (clearVolatilePorts) {
+      wirelessAdbPairPort = "";
+      wirelessAdbConnectPort = "";
+    }
+
+    if (selectedHost !== "")
+      saveWirelessAdbDeviceProfile({ host: selectedHost });
+  }
+
+  function wirelessAdbDeviceContextText() {
+    const deviceName = String(KDEConnect.mainDevice?.name || "").trim();
+    const host = (wirelessAdbConnectHost || "").trim() !== ""
+      ? (wirelessAdbConnectHost || "").trim()
+      : (wirelessAdbPairHost || "").trim();
+
+    if (deviceName === "" && host === "")
+      return "";
+
+    const prefix = deviceName !== ""
+      ? deviceName
+      : root.trSafe("panel.setup-required.phone-name", "Android Phone");
+    const hostText = host !== "" ? (" - " + host) : "";
+    return prefix + hostText + ". "
+      + root.trSafe("panel.wireless-adb.random-port-note", "Wireless debugging ports can change each time. Enter the current port shown on the phone.");
+  }
+
+  function openWirelessAdbDialog() {
+    loadWirelessAdbProfileForSelectedDevice(true);
 
     if ((wirelessAdbConnectHost || "").trim() === "" && (wirelessAdbPairHost || "").trim() !== "")
       wirelessAdbConnectHost = (wirelessAdbPairHost || "").trim();
@@ -1442,7 +1600,9 @@ Item {
 
     const wirelessSerial = configuredWirelessAdbSerial();
     if (wirelessSerial !== "") {
-      if (wirelessAdbSessionPreferred && adbSerialMatchesSelectedDevice(wirelessSerial))
+      if (wirelessAdbSessionPreferred
+          && KDEConnect.adbDeviceSerialConnected(wirelessSerial)
+          && adbSerialMatchesSelectedDevice(wirelessSerial))
         return wirelessSerial;
 
       if (!KDEConnect.adbHasUsbTransport
@@ -3892,10 +4052,18 @@ Item {
         }
 
         NText {
-          text: root.trSafe("panel.wireless-adb.dialog-description", "Pair once from Android's Wireless debugging screen, then connect with the adb port shown on the phone.")
+          text: root.trSafe("panel.wireless-adb.dialog-description", "Pair from Android's Wireless debugging screen, then connect with the current adb port shown on the phone.")
           color: Color.mOnSurfaceVariant
           wrapMode: Text.WordWrap
           Layout.fillWidth: true
+        }
+
+        NText {
+          Layout.fillWidth: true
+          text: root.wirelessAdbDeviceContextText()
+          visible: text !== ""
+          color: root.shellSecondaryTextColor
+          wrapMode: Text.WordWrap
         }
 
         Rectangle {
@@ -3963,7 +4131,7 @@ Item {
                 spacing: Style.marginS
 
                 NText {
-                  text: root.trSafe("panel.wireless-adb.qr-helper-description", "The plugin will wait for the scan, pair automatically, then connect ADB and save the resolved host and port.")
+                  text: root.trSafe("panel.wireless-adb.qr-helper-description", "The plugin will wait for the scan, pair automatically, then connect ADB for the selected phone.")
                   color: Color.mOnSurfaceVariant
                   wrapMode: Text.WordWrap
                   Layout.fillWidth: true
@@ -4096,7 +4264,7 @@ Item {
             }
 
             NText {
-              text: root.trSafe("panel.wireless-adb.connect-section-description", "After pairing, use the adb port shown on the phone. The same phone IP above will be reused.")
+              text: root.trSafe("panel.wireless-adb.connect-section-description", "Use the current adb port shown on the phone. Android may change this port after reconnecting Wireless debugging.")
               color: Color.mOnSurfaceVariant
               wrapMode: Text.WordWrap
               Layout.fillWidth: true

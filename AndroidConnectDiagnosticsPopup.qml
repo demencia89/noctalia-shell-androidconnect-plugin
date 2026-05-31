@@ -86,6 +86,39 @@ Popup {
     return serials.join("\n");
   }
 
+  function resolvedAdbSummary() {
+    const serial = String(panelRoot?.resolvedAdbSerial() || "").trim();
+    if (serial === "")
+      return trSafe("panel.diagnostics.value-adb-not-connected", "not connected");
+
+    if (KDEConnect.isUsbSelectionSerial(serial))
+      return trSafe("panel.diagnostics.value-usb", "USB");
+
+    return serial;
+  }
+
+  function verdictText() {
+    const deviceName = displayValue(KDEConnect.mainDevice?.name, trSafe("panel.diagnostics.value-no-device", "no device"));
+    const kdeHost = displayValue(panelRoot?.selectedDevicePrimaryHost(), trSafe("panel.diagnostics.value-no-host", "no host"));
+    return "Selected: " + deviceName
+      + " | KDE: " + kdeHost
+      + " | ADB: " + resolvedAdbSummary();
+  }
+
+  function verdictSeverity() {
+    if (KDEConnect.mainDevice === null)
+      return "error";
+
+    if (String(panelRoot?.resolvedAdbSerial() || "").trim() === "")
+      return "waiting";
+
+    return "ok";
+  }
+
+  function verdictColor() {
+    return panelRoot?.diagnosticSeverityColor(verdictSeverity()) || Color.mOnSurfaceVariant;
+  }
+
   function deviceRows() {
     const device = KDEConnect.mainDevice;
     return [
@@ -104,12 +137,15 @@ Popup {
   }
 
   function adbRows() {
+    const wirelessProfile = panelRoot?.selectedWirelessAdbProfile() || ({});
     return [
       { label: trSafe("panel.diagnostics.row-adb-refresh", "ADB refresh"), value: timestampText(KDEConnect.adbDevicesLastRefreshAtMs) },
       { label: trSafe("panel.diagnostics.row-adb-exit", "adb devices exit code"), value: String(KDEConnect.adbDevicesExitCode) },
       { label: trSafe("panel.diagnostics.row-usb-transport", "USB transport"), value: boolText(KDEConnect.adbHasUsbTransport) },
       { label: trSafe("panel.diagnostics.row-wireless-configured", "Wireless configured"), value: displayValue(panelRoot?.configuredWirelessAdbSerial()) },
       { label: trSafe("panel.diagnostics.row-wireless-connected", "Wireless connected"), value: displayValue(panelRoot?.connectedWirelessAdbSerial()) },
+      { label: trSafe("panel.diagnostics.row-wireless-profile-host", "Wireless profile host"), value: displayValue(wirelessProfile.host) },
+      { label: trSafe("panel.diagnostics.row-wireless-last-port", "Last known Wireless ADB port"), value: displayValue(wirelessProfile.lastConnectPort) },
       { label: trSafe("panel.diagnostics.row-selected-kde-host", "Selected KDE host"), value: displayValue(panelRoot?.selectedDevicePrimaryHost()) },
       { label: trSafe("panel.diagnostics.row-resolved-adb", "Resolved ADB serial"), value: displayValue(panelRoot?.resolvedAdbSerial()) },
       { label: trSafe("panel.diagnostics.row-adb-states", "ADB states"), value: adbStateSummary() },
@@ -150,6 +186,8 @@ Popup {
     ];
 
     const lines = [];
+    lines.push("Verdict: " + verdictText());
+    lines.push("");
     for (let i = 0; i < sections.length; ++i) {
       lines.push("[" + sections[i].title + "]");
       const rows = sections[i].rows || [];
@@ -230,6 +268,38 @@ Popup {
         text: popupRoot.trSafe("panel.diagnostics.dialog-description", "Raw connection state for KDE Connect, ADB, scrcpy, and the embedded video feed.")
         color: Color.mOnSurfaceVariant
         wrapMode: Text.WordWrap
+      }
+
+      Rectangle {
+        Layout.fillWidth: true
+        color: Qt.alpha(popupRoot.verdictColor(), 0.10)
+        radius: Style.radiusM
+        border.width: Style.borderS
+        border.color: Qt.alpha(popupRoot.verdictColor(), 0.42)
+        implicitHeight: verdictRow.implicitHeight + (Style.marginM * 1.2)
+
+        RowLayout {
+          id: verdictRow
+          anchors.fill: parent
+          anchors.margins: Style.marginM * 0.8
+          spacing: Style.marginM
+
+          NIcon {
+            icon: popupRoot.verdictSeverity() === "ok"
+              ? "circle-check"
+              : (popupRoot.verdictSeverity() === "waiting" ? "wifi" : "exclamation-circle")
+            pointSize: Style.fontSizeM
+            color: popupRoot.verdictColor()
+          }
+
+          NText {
+            Layout.fillWidth: true
+            text: popupRoot.verdictText()
+            color: Color.mOnSurface
+            font.weight: Style.fontWeightBold
+            wrapMode: Text.WordWrap
+          }
+        }
       }
 
       DiagnosticsSection {
