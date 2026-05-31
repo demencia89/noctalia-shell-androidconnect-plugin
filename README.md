@@ -30,7 +30,9 @@ Project repository:
 
 ## Current Status
 
-Current plugin version: `1.4.0`
+Current plugin version: `1.5.0`
+
+See `CHANGELOG.md` for release notes.
 
 The embedded mirror uses a single live feed path:
 
