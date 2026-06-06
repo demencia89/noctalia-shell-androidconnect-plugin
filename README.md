@@ -10,11 +10,7 @@ Upstream base project:
 Project repository:
 - https://github.com/demencia89/noctalia-shell-androidconnect-plugin
 
-## Screenshots
-
-![AndroidConnect panel screenshot](Docs/Screenshots/androidconnect-panel.png)
-
-## Demo
+## Screenshots & Demo
 
 [![Watch the AndroidConnect demo](Docs/Screenshots/androidconnect-panel.png)](Docs/Videos/androidconnect-demo.mp4)
 
