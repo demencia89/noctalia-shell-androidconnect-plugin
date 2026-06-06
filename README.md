@@ -12,21 +12,11 @@ Project repository:
 
 ## Screenshots
 
-### Plugin Preview
+![AndroidConnect panel screenshot](Docs/Screenshots/androidconnect-panel.png)
 
-![AndroidConnect plugin preview](preview.png)
+## Demo
 
-### Panel Overview
-
-![AndroidConnect panel overview](Docs/Screenshots/androidconnect-panel-overview.png)
-
-### Lock Screen View
-
-![AndroidConnect lock screen view](Docs/Screenshots/androidconnect-lock-screen.png)
-
-### Panel Close-up
-
-![AndroidConnect panel close-up](Docs/Screenshots/androidconnect-panel-closeup.png)
+[Watch the AndroidConnect demo on YouTube](https://youtu.be/6XaeCvJOd3Y?si=CcDehRhs06Z8_SfQ)
 
 ## Current Status
 
