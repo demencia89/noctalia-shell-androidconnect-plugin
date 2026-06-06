@@ -16,6 +16,8 @@ Project repository:
 
 ## Demo
 
+[![Watch the AndroidConnect demo on YouTube](https://img.youtube.com/vi/6XaeCvJOd3Y/hqdefault.jpg)](https://youtu.be/6XaeCvJOd3Y?si=CcDehRhs06Z8_SfQ)
+
 [Watch the AndroidConnect demo on YouTube](https://youtu.be/6XaeCvJOd3Y?si=CcDehRhs06Z8_SfQ)
 
 ## Current Status
